@@ -2,7 +2,7 @@
 
 {% block extrahead %}
   {{ super() }}
-  {% if page and page.file.src_uri == "troubleshooting/2026-10-07-openstack-attrs-linecache.md" and page.meta.article_style == "editorial" %}
+  {% if page and page.file.src_uri == "troubleshooting/2026-10-07-openstack-attrs-linecache.md" and page.meta.summary_style == "editorial" %}
     <link rel="stylesheet" href="{{ 'stylesheets/openstack-editorial.css' | url }}">
   {% endif %}
 {% endblock %}

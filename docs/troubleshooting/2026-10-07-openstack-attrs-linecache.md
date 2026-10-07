@@ -3,7 +3,7 @@ title: "OpenStack API 지연 — attrs linecache 누적과 백포트"
 summary: "대시보드 조회 지연에서 출발해 Python 검사 코드의 중복 보관을 추적한 과정. 원인을 좁힌 근거와 수정 전후 검증"
 date: 2026-10-07
 category: 트러블슈팅
-article_style: editorial
+summary_style: editorial
 tags:
   - OpenStack
   - Linux
