@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" role="img" aria-labelledby="title description">
+  <title id="title">attrs 생성 소스 캐시 — 기존 방식과 백포트 비교</title>
+  <desc id="description">기존 방식은 같은 소스를 반복 생성해도 빈 이름을 탐색하고 새 항목을 추가. 백포트는 이름과 생성 소스를 비교해 동일 소스는 기존 항목 재사용, 다른 소스만 별도 이름으로 등록. 화살표는 처리 순서.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 9 5 L 0 10 Z" fill="#2563eb"/>
+    </marker>
+  </defs>
+  <rect x="1" y="1" width="898" height="538" rx="6" fill="#fff" stroke="#0b1f3a"/>
+  <g font-family="Pretendard, Malgun Gothic, Apple SD Gothic Neo, sans-serif" fill="#1e293b">
+    <text x="30" y="38" font-size="21" font-weight="600">동일한 메서드 소스를 반복 생성하는 경우</text>
+    <rect x="20" y="61" width="860" height="169" rx="6" fill="#eff5ff"/>
+    <text x="35" y="91" font-size="18" font-weight="600">기존 attrs 20.3.0</text>
+    <g stroke-width="1">
+      <rect x="35" y="112" width="230" height="75" rx="4" fill="#fff" stroke="#0b1f3a"/>
+      <rect x="335" y="112" width="230" height="75" rx="4" fill="#fff" stroke="#f97316" stroke-width="2"/>
+      <rect x="635" y="112" width="230" height="75" rx="4" fill="#fff" stroke="#0b1f3a"/>
+    </g>
+    <g fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M 277 150 H 319"/>
+      <path d="M 577 150 H 619"/>
+    </g>
+    <g text-anchor="middle">
+      <text x="150" y="144" font-size="18" font-weight="600">메서드 소스 생성</text>
+      <text x="150" y="167" font-size="15" fill="#3d4d63">동일한 내용이어도</text>
+      <text x="450" y="144" font-size="18" font-weight="600">빈 이름 반복 탐색</text>
+      <text x="450" y="167" font-size="15" fill="#3d4d63">누적될수록 탐색 비용 증가</text>
+      <text x="750" y="144" font-size="18" font-weight="600">새 캐시 항목 추가</text>
+      <text x="750" y="167" font-size="15" fill="#3d4d63">소스 보관 메모리 증가</text>
+    </g>
+    <text x="35" y="211" font-size="15" fill="#3d4d63">문제 지점: 생성 소스가 같아도 기존 항목을 재사용하지 않는 이름 예약</text>
+    <rect x="20" y="248" width="860" height="245" rx="6" fill="#eff5ff"/>
+    <text x="35" y="278" font-size="18" font-weight="600">백포트 적용 후</text>
+    <g fill="#fff" stroke="#0b1f3a" stroke-width="1">
+      <rect x="35" y="302" width="230" height="75" rx="4"/>
+      <rect x="335" y="302" width="230" height="75" rx="4"/>
+      <rect x="635" y="302" width="230" height="75" rx="4"/>
+      <rect x="335" y="426" width="230" height="49" rx="4"/>
+    </g>
+    <g fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M 277 340 H 319"/>
+      <path d="M 577 340 H 619"/>
+      <path d="M 450 389 V 414"/>
+    </g>
+    <g text-anchor="middle">
+      <text x="150" y="334" font-size="18" font-weight="600">메서드 소스 생성</text>
+      <text x="150" y="357" font-size="15" fill="#3d4d63">동적 생성 기능 유지</text>
+      <text x="450" y="334" font-size="18" font-weight="600">이름·소스 비교</text>
+      <text x="450" y="357" font-size="15" fill="#3d4d63">기존 등록 내용과 비교</text>
+      <text x="750" y="334" font-size="18" font-weight="600">동일 소스 → 재사용</text>
+      <text x="750" y="357" font-size="15" fill="#3d4d63">같은 소스의 항목 증가 억제</text>
+      <text x="450" y="456" font-size="16" font-weight="600">다른 소스 → 별도 등록</text>
+    </g>
+    <text x="468" y="407" font-size="14" fill="#3d4d63">내용이 다를 때</text>
+    <text x="30" y="521" font-size="15" fill="#3d4d63">실선 화살표: 처리 순서 · 개념도 · linecache 및 디버깅 기능 유지</text>
+  </g>
+</svg>
