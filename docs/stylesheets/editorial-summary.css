@@ -1,4 +1,4 @@
-/* This stylesheet is loaded only by the OpenStack attrs article.
+/* Opt in with summary_style: editorial on an article.
    Every rule is confined to its opening summary. */
 .article-body .editorial-summary {
   --summary-ink: #24382d;
@@ -17,6 +17,9 @@
   gap: 40px;
 }
 .editorial-summary .editorial-summary-copy { max-width: 760px; }
+.editorial-summary.editorial-summary--text-only .editorial-summary-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
 .editorial-summary .editorial-summary-label {
   display: block;
   font-size: 11px;

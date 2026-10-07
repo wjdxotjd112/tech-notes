@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 from datetime import date, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 import yaml
@@ -37,6 +38,102 @@ SECRET_PATTERNS = (
     ),
 )
 LINK_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)|\[[^\]]*\]\(([^)]+)\)")
+# Existing pages retain their original format. Never add new posts to this set.
+LEGACY_SUMMARY_POSTS = frozenset({
+    "automation/2026-10-04-sample-pages-flow.md",
+    "cheatsheets/git-status.md",
+    "design/2026-10-06-sample-ovn-roles.md",
+    "labs/2026-10-05-sample-local-preview.md",
+    "troubleshooting/2026-10-07-sample-log-hypothesis.md",
+})
+
+
+class SummaryHTML(HTMLParser):
+    """Collect real HTML nodes; fenced examples are removed before parsing."""
+
+    def __init__(self):
+        super().__init__()
+        self.nodes = []
+        self.stack = []
+
+    def handle_starttag(self, tag, attrs):
+        node = {"tag": tag, "attrs": dict(attrs), "parent": self.stack[-1] if self.stack else None}
+        self.nodes.append(node)
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index]["tag"] == tag:
+                del self.stack[index:]
+                break
+
+
+def has_class(node, name):
+    return name in (node["attrs"].get("class") or "").split()
+
+
+def inside(node, parent):
+    current = node["parent"]
+    while current is not None:
+        if current is parent:
+            return True
+        current = current["parent"]
+    return False
+
+
+def check_summary(path: Path, data: dict, body: str, docs: Path) -> list[str]:
+    errors = []
+    style = data.get("summary_style")
+    legacy = path.relative_to(docs).as_posix() in LEGACY_SUMMARY_POSTS
+    if style is not None and style != "editorial":
+        return [f"{path}: summary_style must be editorial"]
+    parser = SummaryHTML()
+    parser.feed(without_fences(body))
+    roots = [n for n in parser.nodes if n["tag"] == "section" and has_class(n, "editorial-summary")]
+    if style != "editorial":
+        if roots or not legacy:
+            errors.append(f"{path}: summary_style: editorial is required for an editorial summary or a new post")
+        return errors
+    if len(roots) != 1:
+        return [f"{path}: editorial summary must contain exactly one section.editorial-summary"]
+    root = roots[0]
+    nodes = [n for n in parser.nodes if inside(n, root)]
+    for name, tag in (("editorial-summary-layout", "div"), ("editorial-summary-copy", "div"), ("editorial-summary-label", "span"), ("editorial-summary-title", "h2"), ("editorial-summary-result", "p")):
+        if len([n for n in nodes if n["tag"] == tag and has_class(n, name)]) != 1:
+            errors.append(f"{path}: editorial summary requires one {tag}.{name}")
+    titles = [n for n in nodes if has_class(n, "editorial-summary-title")]
+    if titles:
+        title_id = titles[0]["attrs"].get("id")
+        if not title_id or root["attrs"].get("aria-labelledby") != title_id:
+            errors.append(f"{path}: editorial summary aria-labelledby must match the title id")
+        elif len([n for n in parser.nodes if n["attrs"].get("id") == title_id]) != 1:
+            errors.append(f"{path}: editorial summary title id must be unique")
+    copies = [n for n in nodes if has_class(n, "editorial-summary-copy")]
+    if copies and not any(n["tag"] == "p" and n["parent"] is copies[0] for n in nodes):
+        errors.append(f"{path}: editorial summary copy requires a description paragraph")
+    results = [n for n in nodes if has_class(n, "editorial-summary-result")]
+    if results and not any(n["tag"] == "span" and n["parent"] is results[0] for n in nodes):
+        errors.append(f"{path}: editorial summary result requires an inner span")
+    facts = [n for n in nodes if n["tag"] == "aside" and has_class(n, "editorial-summary-facts")]
+    if has_class(root, "editorial-summary--text-only"):
+        if facts:
+            errors.append(f"{path}: text-only editorial summary must omit the facts aside")
+    elif len(facts) != 1:
+        errors.append(f"{path}: editorial summary needs a facts aside or the text-only class")
+    if facts:
+        fact_nodes = [n for n in nodes if inside(n, facts[0])]
+        labels = [n for n in fact_nodes if has_class(n, "editorial-fact-label")]
+        values = [n for n in fact_nodes if has_class(n, "editorial-fact-value")]
+        if not facts[0]["attrs"].get("aria-label") or not 1 <= len(values) <= 2 or len(labels) != len(values):
+            errors.append(f"{path}: editorial facts require aria-label and one or two labelled values")
+    if any(has_class(n, "incident-summary") for n in parser.nodes):
+        errors.append(f"{path}: do not combine editorial and legacy card summaries")
+    return errors
 
 
 def split_front_matter(text: str) -> tuple[dict | None, str]:
@@ -162,6 +259,7 @@ def check_posts(docs: Path) -> list[str]:
             errors.append(f"{rel}: figure_lines must be a list")
         if "spotlight" in data and not isinstance(data["spotlight"], bool):
             errors.append(f"{rel}: spotlight must be true or false")
+        errors.extend(check_summary(path, data, body, docs))
         blob = f"{title or ''}\n{summary or ''}\n{body}"
         for marker in PLACEHOLDER_MARKERS:
             if marker in blob:
@@ -187,13 +285,18 @@ def check_guide_files(paths: list[Path], docs: Path) -> list[str]:
 
 
 def valid_body(category: str) -> str:
-    return f"확인 내용.\n\n## 참고 자료\n\n공식 문서 기준. 실행 결과는 없음.\n\n분류: {category}\n"
+    return ('<section class="editorial-summary editorial-summary--text-only" aria-labelledby="summary-title">'
+            '<div class="editorial-summary-layout"><div class="editorial-summary-copy">'
+            '<span class="editorial-summary-label">핵심</span>'
+            '<h2 class="editorial-summary-title" id="summary-title">확인 내용</h2><p>근거와 설명</p>'
+            '</div></div><p class="editorial-summary-result"><span>확인 범위</span></p></section>'
+            f"\n\n## 참고 자료\n\n공식 문서 기준. 실행 결과는 없음.\n\n분류: {category}\n")
 
 
 def write_post(docs: Path, name: str, meta: str, body: str) -> None:
     path = docs / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\n{meta}\n---\n\n{body}", encoding="utf-8")
+    path.write_text(f"---\nsummary_style: editorial\n{meta}\n---\n\n{body}", encoding="utf-8")
 
 
 def expect_fail(docs: Path, label: str) -> str | None:
@@ -238,12 +341,12 @@ def self_test() -> int:
             "placeholder": (
                 "bad/2026-10-08-placeholder.md",
                 "title: '{{title}}'\nsummary: 요약\ndate: 2026-10-08\ncategory: 자동화 CI/CD\ntags:\n  - CI/CD\n",
-                "작성 후 삭제\n",
+                valid_body("자동화 CI/CD") + "작성 후 삭제\n",
             ),
             "missing-image": (
                 "bad/2026-10-09-image.md",
                 "title: 제목\nsummary: 요약\ndate: 2026-10-09\ncategory: 성능 튜닝\ntags:\n  - Linux\n",
-                "![그림](../assets/missing.png)\n",
+                valid_body("성능 튜닝") + "![그림](../assets/missing.png)\n",
             ),
         }
         for label, (name, meta, body) in cases.items():
@@ -272,7 +375,7 @@ def self_test() -> int:
             secret_docs,
             "sec/2026-10-07-secret.md",
             "title: 제목\nsummary: 요약\ndate: 2026-10-07\ncategory: 트러블슈팅\ntags:\n  - Linux\n",
-            f"token = '{token}'\n",
+            valid_body("트러블슈팅") + f"token = '{token}'\n",
         )
         secret_errors = check_posts(secret_docs)
         if not secret_errors:
@@ -291,6 +394,40 @@ def self_test() -> int:
         category_errors = check_posts(category_docs)
         if category_errors:
             failures.append("valid categories rejected: " + "; ".join(category_errors))
+
+        summary_path = docs / "notes/2026-10-07-summary.md"
+        text_only = valid_body("구축설계")
+        fact = ('<div><span class="editorial-fact-label">대상</span>'
+                '<p class="editorial-fact-value">1<span>단위</span></p></div>')
+        with_facts = text_only.replace(" editorial-summary--text-only", "").replace(
+            '</div></div><p class="editorial-summary-result">',
+            '</div><aside class="editorial-summary-facts" aria-label="관측값">' + fact + '</aside></div><p class="editorial-summary-result">',
+        )
+        for name, body in (("text-only", text_only), ("one-fact", with_facts),
+                           ("two-facts", with_facts.replace(fact, fact * 2))):
+            if check_summary(summary_path, {"summary_style": "editorial"}, body, docs):
+                failures.append("valid editorial summary rejected: " + name)
+        summary_cases = (
+            ({}, text_only, "summary_style: editorial"),
+            ({}, "요약 없음", "summary_style: editorial"),
+            ({"summary_style": "other"}, text_only, "summary_style must"),
+            ({"summary_style": "editorial"}, "```html\n" + text_only + "\n```", "exactly one"),
+            ({"summary_style": "editorial"}, text_only * 2, "exactly one"),
+            ({"summary_style": "editorial"}, text_only.replace('aria-labelledby="summary-title"', 'aria-labelledby="missing"'), "aria-labelledby"),
+            ({"summary_style": "editorial"}, text_only.replace('editorial-summary-result', 'other-result'), "p.editorial-summary-result"),
+            ({"summary_style": "editorial"}, text_only.replace('<span>확인 범위</span>', '확인 범위'), "inner span"),
+            ({"summary_style": "editorial"}, text_only.replace(' editorial-summary--text-only', ''), "facts aside"),
+            ({"summary_style": "editorial"}, with_facts.replace(fact, fact * 3), "one or two"),
+            ({"summary_style": "editorial"}, with_facts.replace('aria-label="관측값"', ''), "aria-label"),
+            ({"summary_style": "editorial"}, with_facts.replace('class="editorial-summary"', 'class="editorial-summary editorial-summary--text-only"'), "must omit"),
+        )
+        for meta, body, expected in summary_cases:
+            actual = check_summary(summary_path, meta, body, docs)
+            if not any(expected in error for error in actual):
+                failures.append("summary check did not reject: " + expected)
+        for legacy in LEGACY_SUMMARY_POSTS:
+            if check_summary(docs / legacy, {}, "기존 본문", docs):
+                failures.append("existing post format was rejected: " + legacy)
 
     if failures:
         for failure in failures:

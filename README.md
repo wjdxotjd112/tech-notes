@@ -30,6 +30,7 @@ OpenStack · Ceph · Monitoring · Automation
 
 - [작성 규칙](guides/WRITING.md)
 - [문서 표현 표준](guides/FORMATTING.md): 요약·그림·강조·들여쓰기·코드 작성 기준
+- [구성 요소 예시](guides/COMPONENTS.md): 새 글에 재사용할 편집형 요약·들여쓰기·토글·그림 코드
 - [로컬 운영](guides/OPERATIONS.md)
 - [배포](guides/DEPLOYMENT.md)
 
