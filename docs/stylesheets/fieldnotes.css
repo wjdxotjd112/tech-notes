@@ -176,26 +176,30 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .article-body li + li { margin-top: 6px; }
 .article-body img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
 .article-body strong { font-weight: 700; color: var(--navy); }
-.article-body .architecture-diagram { display: block; width: 100%; max-width: 340px; margin: 12px auto; }
+.article-body .architecture-diagram { display: block; width: 100%; max-width: 280px; margin: 10px auto; }
 .article-body .environment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 16px 0; }
 .article-body .environment-grid > div > p:first-child { text-align: center; }
 .article-body .environment-section p,
 .article-body .environment-section li,
 .article-body .environment-section table th,
-.article-body .environment-section table td { font-size: 15px; line-height: 1.7; }
-.article-body .subsection-title { margin: 26px 0 12px; font-size: 18px; }
-.article-body .section-body { margin-left: 28px; padding-left: 16px; border-left: 2px solid #e2e8f0; }
-.article-body details.analysis-toggle { margin: 16px 0; border-left: 3px solid #2563eb; }
+.article-body .environment-section table td { font-size: 14px; line-height: 1.65; }
+.article-body .environment-section table th,
+.article-body .environment-section table td { padding: 8px 12px; }
+.article-body .subsection-title { margin: 26px 0 12px 20px; font-size: 17px; }
+.article-body .section-body { margin-left: 56px; padding-left: 0; border-left: 0; }
+.article-body details.analysis-toggle { margin: 16px 0 16px 20px; border-left: 3px solid #2563eb; }
 .article-body details.analysis-toggle > summary {
   background: #eff5ff;
   color: #0b1f3a;
   font-weight: 750;
 }
-.article-body details.analysis-toggle > :not(summary) { margin-left: 40px; margin-right: 24px; }
+.article-body details.analysis-toggle > :not(summary) { margin-left: 48px; margin-right: 24px; }
 @media (max-width: 700px) {
   .article-body .environment-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .article-body .section-body { margin-left: 12px; padding-left: 12px; }
-  .article-body details.analysis-toggle > :not(summary) { margin-left: 32px; margin-right: 16px; }
+  .article-body .subsection-title { margin-left: 8px; }
+  .article-body .section-body { margin-left: 28px; padding-left: 0; }
+  .article-body details.analysis-toggle { margin-left: 8px; }
+  .article-body details.analysis-toggle > :not(summary) { margin-left: 36px; margin-right: 12px; }
 }
 .article-body .admonition.tip { background: #effaf6; border-left-color: #16804a; }
 .article-body .admonition.tip > .admonition-title { color: #12613b; }

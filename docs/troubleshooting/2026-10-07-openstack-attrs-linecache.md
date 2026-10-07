@@ -27,13 +27,13 @@ figure_lines:
 
 <div class="environment-section" markdown="1">
 
-| 항목 | 운영 환경 |
+| 항목 | 환경 |
 | --- | --- |
 | OS | RHEL 9.4 |
 | OpenStack | Caracal |
 | Python | 3.9 계열 |
 | attrs 패키지 | `python3-attrs-20.3.0-7.el9.noarch` |
-| Keystone worker | Controller마다 6개 |
+| Keystone worker process | 6개 / Controller |
 
 <div class="environment-grid" markdown="1">
 
@@ -59,9 +59,7 @@ figure_lines:
 
 - **HAProxy:** 앞단에서 각 Controller로 API 요청 분배.
 - **Keystone:** 사용자 인증과 토큰 발급. **Nova API:** 가상머신·하이퍼바이저 조회.
-- **worker:** 요청 처리 프로세스. **PID:** 프로세스 식별 번호. 요청에 따라 CPU가 높은 worker가 달라져 6개 전체 관찰.
-- **linecache:** 각 worker의 메모리에 생성 소스를 보관하는 Python 캐시. 외부 Memcached와는 별개.
-- 목록 조회는 Keystone 인증 토큰을 받아 Nova API를 호출하는 흐름. 인증과 실제 조회 시간을 나눠 확인.
+- **worker:** 요청 처리 프로세스. **PID:** 프로세스 식별 번호. 각 Controller에서 worker 6개 실행.
 
 </div>
 
@@ -95,7 +93,11 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 ## 3. 원인 분석
 
-조회 API → 요청 분배 → 트래픽 → 외부 응답 대기 → Python 실행 순서로 범위를 축소. **각 단계에서 지연을 설명할 수 있는지 확인하고 다음 조사 대상 결정.**
+<div class="section-body" markdown="1">
+
+API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서로 확인.
+
+</div>
 
 <details class="analysis-toggle" markdown="1">
 <summary>3-1. API 버전 때문에 추가 작업이 생긴 것은 아닐까?</summary>
@@ -132,7 +134,8 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 **판단:** 현재 요청량 차이만으로 설명하기 어려워 worker 내부 상태에 집중.
 
-6개 PID 자체는 유지됐지만 CPU가 높은 worker는 기존 프로세스 사이에서 교대. 요청을 받은 worker가 비싼 작업을 수행하는 상황과 맞는 모습. 실제로 POST는 계속 유입되고 있었으므로 완전한 무요청 상태는 아님.
+- 6개 worker PID는 유지, CPU가 높은 worker만 교대. 특정 PID 하나가 아니라 6개 전체를 관찰한 이유.
+- POST는 계속 유입되는 상태. 요청량이 적었던 것이며 완전한 무요청 상태는 아님.
 
 
 </details>
@@ -162,7 +165,8 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 - `uuid.py`의 **`__str__()`** — 이름 예약에 쓰는 식별 값을 문자열로 변환.
 - `<attrs generated ... Validator-N>` — 검사 도구의 생성 소스에 붙은 가상 파일명.
 
-문제 노드의 생성 파일명 번호는 약 **69만**, 정상 노드는 약 **2만** 수준. 여기서 `Validator-N`의 N은 생성 소스의 파일명 번호이며, 살아 있는 객체 개수나 캐시 항목을 직접 센 값은 아님. 메모리에서도 `RssAnon`·`Anonymous`·`Private_Dirty`·`VmData` 증가. 공유 라이브러리만 커진 것이 아니라 프로세스의 사유·익명 메모리가 늘어난 상황.
+- **생성 파일명 번호:** 정상 노드 약 2만, 문제 노드 약 69만. `Validator-N`의 N은 파일명에 붙은 번호이며 객체·캐시 개수를 직접 센 값은 아님.
+- **메모리:** `RssAnon`·`Anonymous`·`Private_Dirty`·`VmData` 증가. 프로세스의 사유·익명 메모리에 누적 관찰.
 
 **판단:** 큰 번호의 생성 소스, 이름 생성 함수의 반복 실행, 프로세스 메모리 증가가 함께 관찰돼 코드 생성·보관 경로로 범위 축소.
 
@@ -291,9 +295,9 @@ token = authentication.authenticate_for_token(auth_data)
 
 <div class="section-body" markdown="1">
 
-attrs는 메서드 소스를 문자열로 만든 다음 실행 가능한 Python 코드로 변환. 이 소스는 실제 파일에서 읽은 것이 아니므로, 오류나 디버깅 시 내용을 표시하려면 별도 보관이 필요.
-
-Python의 **linecache**가 그 역할을 담당. `<attrs generated init ... Validator>` 같은 가상 파일명을 붙이고 생성 소스 저장. 실제 디스크 파일을 만드는 것이 아니라 **프로세스 메모리에 소스 문자열과 관련 정보를 보관**.
+- **생성:** attrs가 메서드 소스를 문자열로 만들고 실행 가능한 Python 코드로 변환.
+- **보관 이유:** 실제 파일에서 읽은 코드가 아니므로, 오류 분석·디버깅 때 소스를 표시하려면 별도 보관 필요.
+- **보관 위치:** Python의 **linecache**에 가상 파일명을 붙여 저장. 디스크 파일이 아니라 **각 worker의 메모리에 소스 문자열과 관련 정보를 보관**. 외부 Memcached와는 별개.
 
 </div>
 
@@ -311,7 +315,7 @@ Python의 **linecache**가 그 역할을 담당. `<attrs generated init ... Vali
     <li>새 항목으로 보관</li>
   </ol>
   <ul>
-    <li>기존 attrs 20.3.0의 소스 보관 순서. 코드 내용이 같아도 반복 등록.</li>
+    <li>같은 소스도 다른 번호로 반복 저장.</li>
   </ul>
 </figure>
 
@@ -345,7 +349,7 @@ Python의 **linecache**가 그 역할을 담당. `<attrs generated init ... Vali
     <li>같으면 기존 항목 사용</li>
   </ol>
   <ul>
-    <li>수정 후 소스 보관 순서. 같은 이름이라도 코드 내용이 다르면 별도 항목 등록.</li>
+    <li>같은 소스는 재사용, 다른 소스만 추가 저장.</li>
   </ul>
 </figure>
 
