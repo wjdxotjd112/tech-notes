@@ -3,6 +3,7 @@
 이 저장소에서 글을 쓰거나 사이트를 올릴 때 아래를 읽는다.
 
 - [작성 규칙](guides/WRITING.md)
+- [코드·그림 표준](guides/FORMATTING.md): 코드박스·흐름도·이미지 형식
 - [로컬 운영](guides/OPERATIONS.md)
 - [배포](guides/DEPLOYMENT.md)
 - [템플릿](templates/post.md)

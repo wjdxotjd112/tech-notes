@@ -2,6 +2,8 @@
 
 공통 메타데이터와 문체는 [guides/WRITING.md](../guides/WRITING.md). 종류별 본문:
 
+코드·그림은 [공통 표준](../guides/FORMATTING.md)과 [복사 예제](formatting.md) 사용. 기존 사이트 스타일을 그대로 재사용.
+
 - [트러블슈팅](troubleshooting.md)
 - [구축설계](design.md)
 - [자동화 CI/CD](automation.md)
