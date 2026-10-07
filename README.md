@@ -1,4 +1,4 @@
-# Fieldnotes
+# SkillNotes
 
 개인 기술 기록을 MkDocs로 만들어 GitHub Pages에 올리는 저장소다.
 

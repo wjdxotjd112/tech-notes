@@ -89,8 +89,12 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .button:hover { border-color: var(--blue); }
 .pill { display: inline-block; font-size: 11px; color: var(--blue); background: var(--soft); padding: 4px 9px; border-radius: 3px; }
 .status { font: 10px var(--mono); letter-spacing: 0.09em; color: var(--muted); }
-.hero { padding: 62px 0 50px; display: grid; grid-template-columns: 1fr 235px; align-items: end; gap: 40px; }
-.hero h1 { font-size: 54px; white-space: pre-line; }
+.home-sheet { display: grid; grid-template-columns: minmax(0, 1fr) 360px; column-gap: 40px; align-items: start; }
+.hero { grid-column: 1; padding: 62px 0 0; }
+.home-rail { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 83px; align-self: start; padding-top: 62px; }
+.home-list { grid-column: 1; margin-top: 36px; }
+.tools { position: sticky; top: 83px; z-index: 1; background: #fff; }
+.hero h1 { font-size: 46px; white-space: pre-line; }
 .hero p { color: var(--muted); margin-top: 18px; max-width: 630px; }
 .band {
   display: grid;
@@ -107,9 +111,11 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .band strong { display: block; font-size: 20px; font-weight: 600; line-height: 1.4; }
 .band p { margin: 6px 0 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
 .band:hover strong { color: var(--blue); }
-.author-note { border-left: 1px solid var(--line); padding-left: 27px; font-size: 12px; }
-.author-note .initial { width: 47px; height: 47px; border: 1px solid var(--line); font: 16px var(--mono); display: grid; place-items: center; margin-bottom: 13px; }
-.author-note p { font-size: 12px; margin: 10px 0 0; color: var(--muted); }
+.author-note { border-left: 1px solid var(--line); padding-left: 27px; font-size: 13px; line-height: 1.55; }
+.author-note strong { display: block; color: var(--navy); font-weight: 600; }
+.author-note p { margin: 10px 0 0; color: var(--muted); }
+.author-note .contact { margin-top: 28px; }
+.author-note a { color: inherit; }
 .editor-feature { display: grid; grid-template-columns: 1.05fr 1fr; background: var(--navy); color: white; border-radius: 5px; overflow: hidden; }
 .feature-copy { padding: 36px; }
 .feature-copy h2 { font-size: 29px; color: white; line-height: 1.5; letter-spacing: -0.035em; margin-top: 18px; }
@@ -141,7 +147,11 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .tagline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
 .empty { padding: 32px; border: 1px dashed var(--line); text-align: center; color: var(--muted); }
 [hidden] { display: none !important; }
-.journal-side { padding-top: 9px; }
+.journal-side { margin-top: 28px; }
+.pager { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 22px; }
+.pager button, .pager span { min-width: 36px; height: 36px; padding: 0 8px; border: 0; background: transparent; color: var(--muted); font-size: 14px; }
+.pager button { cursor: pointer; border-bottom: 2px solid transparent; }
+.pager button[aria-current="page"] { color: var(--navy); font-weight: 600; border-bottom-color: var(--navy); }
 .journal-side h3 { font-size: 14px; margin-bottom: 16px; }
 .journal-side button { display: block; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: white; padding: 13px 0; width: 100%; font-size: 12px; }
 .journal-side button:hover, .journal-side button.active { color: var(--blue); }
@@ -352,8 +362,9 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .feature-copy h2, .post h3, .hero h1 { overflow-wrap: anywhere; }
 
 @media (max-width: 1000px) {
-  .hero { grid-template-columns: 1fr; }
-  .author-note { display: none; }
+  .home-sheet { grid-template-columns: 1fr; }
+  .home-rail { position: static; grid-column: 1; grid-row: auto; padding-top: 18px; }
+  .author-note { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 18px; margin-top: 8px; }
   .journal-body { gap: 30px; grid-template-columns: minmax(0, 1fr) 180px; }
   .editor-feature { grid-template-columns: 1fr 1fr; }
   .feature-copy { padding: 25px; }
@@ -369,8 +380,9 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
   .brand { font-size: 14px; gap: 8px; }
   .mark { width: 27px; height: 27px; font-size: 14px; }
   .wrap { padding: 0 21px; }
-  .hero { padding: 36px 0 29px; }
-  .hero h1 { font-size: 37px; }
+  .tools { top: 70px; }
+  .hero { padding: 36px 0 8px; }
+  .hero h1 { font-size: 32px; }
   .hero p { font-size: 13px; }
   .editor-feature { grid-template-columns: 1fr; }
   .band { grid-template-columns: 1fr; gap: 4px; }
