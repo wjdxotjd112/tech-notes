@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block header %}
+  {% include "partials/fn-header.html" %}
+{% endblock %}
+
+{% block site_nav %}{% endblock %}
+
+{% block container %}
+  <div class="md-content" data-md-component="content">
+    {% if page.meta and page.meta.layout == "home" %}
+      {% include "partials/fn-home.html" %}
+    {% else %}
+      {% include "partials/fn-article.html" %}
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block footer %}
+  {% include "partials/fn-footer.html" %}
+{% endblock %}

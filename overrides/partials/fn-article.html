@@ -1,0 +1,45 @@
+{% set meta = page.meta or {} %}
+<main class="article-wrap">
+  <div class="article-layout">
+    <article>
+      <header class="article-head">
+        <div class="article-type">
+          {% if meta.category %}<span class="pill">{{ meta.category }}</span>{% endif %}
+          {% for tag in meta.tags or [] %}<span class="topic-name">{{ tag }}</span>{% endfor %}
+          {% if meta.sample %}<span class="status">샘플</span>{% endif %}
+        </div>
+        <h1>{{ page.title }}</h1>
+        {% if meta.summary %}<p class="summary">{{ meta.summary }}</p>{% endif %}
+        <p class="byline">
+          {% if meta.date %}{{ meta.date }}{% endif %}
+          {% if meta.category %} · {{ meta.category }}{% endif %}
+        </p>
+      </header>
+      <div class="article-body md-typeset">
+      {{ page.content }}
+      </div>
+      {% if related_posts %}
+      <section class="related">
+        <h2>관련 글</h2>
+        {% for post in related_posts %}
+        <a href="{{ post.url | url }}">{{ post.title }}</a>
+        {% endfor %}
+      </section>
+      {% endif %}
+      <p class="backlink"><a href="{{ nav.homepage.url | url }}">목록으로 돌아가기</a></p>
+    </article>
+    <aside class="toc">
+      <strong>목차</strong>
+      {% if page.toc %}
+        {% for item in page.toc %}
+          <a href="{{ item.url }}">{{ item.title }}</a>
+          {% for child in item.children %}
+            <a class="toc-child" href="{{ child.url }}">{{ child.title }}</a>
+          {% endfor %}
+        {% endfor %}
+      {% else %}
+        <p>이 글에는 목차로 뽑을 제목이 없다.</p>
+      {% endif %}
+    </aside>
+  </div>
+</main>

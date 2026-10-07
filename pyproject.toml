@@ -1,0 +1,12 @@
+[project]
+name = "fieldnotes"
+version = "0.1.0"
+description = "Fieldnotes, a personal engineering journal"
+requires-python = ">=3.12"
+dependencies = [
+  "mkdocs>=1.6.1,<2",
+  "mkdocs-material>=9.7.6,<10",
+]
+
+[tool.uv]
+package = false

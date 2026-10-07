@@ -1,0 +1,54 @@
+site_name: Fieldnotes
+site_description: 운영과 구축 사이에서 확인한 내용을 남기는 기술 기록
+site_url: https://wjdxotjd112.github.io/tech-notes/
+repo_url: https://github.com/wjdxotjd112/tech-notes
+repo_name: wjdxotjd112/tech-notes
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  custom_dir: overrides
+  language: ko
+  font: false
+  features:
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+plugins:
+  - search:
+      lang: ko
+
+hooks:
+  - hooks/journal.py
+
+extra_css:
+  - stylesheets/fieldnotes.css
+
+extra_javascript:
+  - javascripts/journal.js
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+      slugify: !!python/name:markdown.extensions.toc.slugify_unicode
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+validation:
+  absolute_links: warn
+  unrecognized_links: warn
+  omitted_files: warn
+  anchors: warn

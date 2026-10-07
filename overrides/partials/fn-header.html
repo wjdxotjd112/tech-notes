@@ -1,0 +1,14 @@
+<header class="top" data-md-component="header">
+  <a class="brand" href="{{ nav.homepage.url | url }}">
+    <span class="mark">fn</span>FIELDNOTES
+    <span class="location">/ JOURNAL</span>
+  </a>
+  <nav aria-label="상단 메뉴">
+    <a href="{{ nav.homepage.url | url }}">기록</a>
+    <a href="{{ nav.homepage.url | url }}#browse">목차</a>
+    <label class="search-open" for="__search">검색</label>
+  </nav>
+</header>
+{% if "material/search" in config.plugins %}
+  {% include "partials/search.html" %}
+{% endif %}

@@ -1,0 +1,101 @@
+{% set featured = namespace(post=None) %}
+{% for post in journal_posts %}
+  {% if post.featured and not featured.post %}
+    {% set featured.post = post %}
+  {% endif %}
+{% endfor %}
+{% if not featured.post and journal_posts %}
+  {% set featured.post = journal_posts[0] %}
+{% endif %}
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <div class="eyebrow">FIELD NOTES / PERSONAL ENGINEERING JOURNAL</div>
+      <h1>운영의 흔적을,
+기술의 기록으로.</h1>
+      <p>문제를 만났을 때 무엇을 의심했고, 어떻게 확인했는지.<br>구축과 운영 사이에서 배운 것들을 남기는 공간.</p>
+    </div>
+    <aside class="author-note">
+      <div class="initial">fn.</div>
+      <strong>Infrastructure Engineer</strong>
+      <p>클라우드 · Linux · 자동화<br>실험하고 기록하는 일.</p>
+    </aside>
+  </section>
+  {% if featured.post %}
+  <section class="editor-feature">
+    <div class="feature-copy">
+      <span class="pill">FEATURED / {{ featured.post.category }}</span>
+      <h2>{{ featured.post.title }}</h2>
+      <p>{{ featured.post.summary }}</p>
+      <a class="readlink" href="{{ featured.post.url | url }}">이야기 읽기 ↗</a>
+    </div>
+    {% if featured.post.figure_lines %}
+    <div class="code-visual" aria-label="대표 글 메모">
+      <div class="window-label">{{ featured.post.figure_label }}</div>
+      <code>{% for line in featured.post.figure_lines %}{% if line is mapping %}{% if not loop.first %}
+{% endif %}{% if line.em %}<em>{{ line.text }}</em>{% else %}{{ line.text }}{% endif %}{% else %}{% if not loop.first %}
+{% endif %}{{ line }}{% endif %}{% endfor %}</code>
+      <p>샘플로 적어 둔 조사 순서</p>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+  <div class="journal-body">
+    <section id="browse">
+      <div class="section-head">
+        <div>
+          <h2>작업의 기록</h2>
+          <small id="result-count"></small>
+        </div>
+        <label class="search">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+          <input id="search" type="search" placeholder="제목, 기술, 업무 유형 검색" aria-label="글 검색">
+        </label>
+      </div>
+      <div class="filterrow" aria-label="글 유형">
+        <button class="chip" type="button" data-kind-filter="" aria-pressed="true">전체</button>
+        {% for category in journal_categories %}
+        <button class="chip" type="button" data-kind-filter="{{ category }}" aria-pressed="false">{{ category }}</button>
+        {% endfor %}
+        <button class="chip" id="reset" type="button">초기화</button>
+      </div>
+      <label class="mobile-tech">기술 분야
+        <select id="mobile-tech">
+          <option value="">전체 기술</option>
+          {% for tag in journal_tags %}
+          <option>{{ tag }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="cards" id="posts">
+        {% for post in journal_posts %}
+        <a class="post" href="{{ post.url | url }}" data-tags="{{ post.tags | join('|') }}" data-kind="{{ post.category }}" data-search="{{ post.title }} {{ post.summary }} {{ post.category }} {{ post.tags | join(' ') }} {{ post.date }}">
+          <div class="tagline">
+            <span class="pill">{{ post.category }}</span>
+            {% for tag in post.tags %}<span>{{ tag }}</span>{% endfor %}
+            {% if post.sample %}<span class="status">샘플</span>{% endif %}
+          </div>
+          <h3>{{ post.title }}</h3>
+          <p>{{ post.summary }}</p>
+          <div class="post-bottom"><span>{{ post.date }}</span><b>읽어보기 ↗</b></div>
+        </a>
+        {% endfor %}
+      </div>
+      <p class="empty" id="empty" hidden>조건에 맞는 글이 없다. 다른 검색어를 입력하거나 필터를 초기화해 보자.</p>
+    </section>
+    <aside class="journal-side">
+      <h3>주제별로 읽기</h3>
+      {% for tag in journal_tags %}
+      <button type="button" data-tech-filter="{{ tag }}">{{ tag }} ↗</button>
+      {% endfor %}
+      {% for post in journal_posts if post.spotlight %}
+      <div class="series-note">
+        <span class="mono">SAMPLE</span>
+        <b>{{ post.title }}</b>
+        <p>{{ post.spotlight_note }}</p>
+        <a class="button" href="{{ post.url | url }}">샘플 글 보기</a>
+      </div>
+      {% endfor %}
+    </aside>
+  </div>
+</main>

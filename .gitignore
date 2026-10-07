@@ -1,0 +1,10 @@
+site/
+.venv/
+__pycache__/
+*.pyc
+.cache/
+.design-reference/
+drafts/
+*.log
+.env
+.env.*
