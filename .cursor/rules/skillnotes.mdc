@@ -1,0 +1,6 @@
+---
+description: SkillNotes 글과 배포는 저장소의 AGENTS.md를 따른다
+alwaysApply: true
+---
+
+글을 쓰거나 이 사이트를 배포하기 전에 AGENTS.md와 그 문서가 가리키는 guides/를 읽는다.
