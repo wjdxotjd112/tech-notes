@@ -1,5 +1,6 @@
 {% set meta = page.meta or {} %}
-<main class="article-wrap">
+{% set editorial = page and page.file.src_uri == "troubleshooting/2026-10-07-openstack-attrs-linecache.md" and meta.article_style == "editorial" %}
+<main class="article-wrap{% if editorial %} article-editorial{% endif %}">
   <div class="article-layout">
     <article>
       <header class="article-head">
@@ -9,7 +10,7 @@
           {% if meta.sample %}<span class="status">샘플</span>{% endif %}
         </div>
         <h1>{{ page.title }}</h1>
-        {% if meta.summary %}<p class="summary">{{ meta.summary }}</p>{% endif %}
+        {% if meta.summary and not editorial %}<p class="summary">{{ meta.summary }}</p>{% endif %}
         <p class="byline">
           {% if meta.date %}{{ meta.date }}{% endif %}
           {% if meta.category %} · {{ meta.category }}{% endif %}

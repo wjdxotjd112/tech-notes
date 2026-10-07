@@ -3,6 +3,7 @@ title: "OpenStack API 지연 — attrs linecache 누적과 백포트"
 summary: "대시보드 조회 지연에서 출발해 Python 검사 코드의 중복 보관을 추적한 과정. 원인을 좁힌 근거와 수정 전후 검증"
 date: 2026-10-07
 category: 트러블슈팅
+article_style: editorial
 tags:
   - OpenStack
   - Linux
@@ -15,32 +16,26 @@ figure_lines:
     em: true
 ---
 
-<section class="incident-summary" aria-labelledby="incident-summary-title">
-  <div class="incident-summary-header">
-    <span class="incident-summary-label">핵심 요약</span>
-    <p id="incident-summary-title">OpenStack API 지연의 원인과 해결</p>
+<section class="editorial-summary" aria-labelledby="editorial-summary-title">
+  <div class="editorial-summary-layout">
+    <div class="editorial-summary-copy">
+      <span class="editorial-summary-label">이 기록의 결론</span>
+      <h2 id="editorial-summary-title" class="editorial-summary-title">같은 검사 코드가<br>계속 쌓이고 있었다.</h2>
+      <p>특정 Controller에서만 API 응답이 느려졌다.<br>추적 끝에 확인한 것은 attrs가 생성한 검사 코드였다. 같은 소스가 다른 이름으로 반복 저장되면서 메모리 사용량과 이름 탐색 비용이 늘어났다.</p>
+    </div>
+    <aside class="editorial-summary-facts" aria-label="문제 노드에서 관찰한 지연">
+      <div>
+        <span class="editorial-fact-label">토큰 발급</span>
+        <p class="editorial-fact-value">2<span>초 이상</span></p>
+      </div>
+      <div>
+        <span class="editorial-fact-label">하이퍼바이저 조회</span>
+        <p class="editorial-fact-value">6–7<span>초</span></p>
+      </div>
+    </aside>
   </div>
-  <div class="incident-summary-grid">
-    <div class="summary-card">
-      <span class="summary-card-label">증상</span>
-      <p>특정 Controller에서 토큰 발급 <strong>2초 이상</strong>, 하이퍼바이저 목록 조회 <strong>6~7초</strong> 소요.</p>
-    </div>
-    <div class="summary-card">
-      <span class="summary-card-label">원인</span>
-      <p>요청 검사에 쓰이는 <strong>같은 보조 코드가 다른 이름으로 반복 저장</strong>. 메모리와 저장 위치 탐색 비용 증가.</p>
-    </div>
-    <div class="summary-card">
-      <span class="summary-card-label">해결</span>
-      <p>attrs 수정사항을 기존 버전에 반영해 <strong>동일 소스의 캐시 항목을 재사용</strong>하도록 변경.</p>
-    </div>
-    <div class="summary-card">
-      <span class="summary-card-label">검증</span>
-      <p>반복 시험에서 <strong>중복 보관 중단 확인</strong>. 토큰 발급·Nova·Cinder API 정상 응답 확인.</p>
-    </div>
-  </div>
+  <p class="editorial-summary-result"><span>attrs 수정사항을 백포트해 <strong>동일 소스의 캐시 항목을 재사용</strong>하도록 바꿨다. 반복 시험에서 중복 저장이 멈췄고, 토큰 발급·Nova·Cinder API의 정상 응답을 확인했다.</span></p>
 </section>
-
----
 
 ## 1. 환경과 요청 처리 구조
 
