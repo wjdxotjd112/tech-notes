@@ -21,7 +21,6 @@ GUIDE_FILES = [
     ROOT / "AGENTS.md",
     ROOT / "CLAUDE.md",
     *sorted((ROOT / "guides").glob("*.md")),
-    *sorted((ROOT / "templates").glob("*.md")),
 ]
 PLACEHOLDER_MARKERS = ("{{", "작성 후 삭제", "PLACEHOLDER")
 SECRET_PATTERNS = (
@@ -281,41 +280,17 @@ def self_test() -> int:
         elif any(token in error for error in secret_errors):
             failures.append("secret value leaked into the message")
 
-        template_docs = Path(tmp) / "templates"
-        for category, folder in (
-            ("트러블슈팅", "troubleshooting"),
-            ("구축설계", "design"),
-            ("자동화 CI/CD", "automation"),
-            ("성능 튜닝", "performance"),
-        ):
-            raw = (ROOT / "templates" / f"{folder}.md").read_text(encoding="utf-8")
-            copied = template_docs / folder / "2026-10-07-sample.md"
-            copied.parent.mkdir(parents=True, exist_ok=True)
-            copied.write_text(raw, encoding="utf-8")
-        message = expect_fail(template_docs, "raw-templates")
-        if message:
-            failures.append(message)
-        filled = Path(tmp) / "filled"
-        for index, (category, folder) in enumerate(
-            (
-                ("트러블슈팅", "troubleshooting"),
-                ("구축설계", "design"),
-                ("자동화 CI/CD", "automation"),
-                ("성능 튜닝", "performance"),
-            ),
-            start=1,
-        ):
-            raw = (ROOT / "templates" / f"{folder}.md").read_text(encoding="utf-8")
-            text = raw.replace("{{title}}", f"확인 {index}")
-            text = text.replace("{{summary}}", "짧은 요약")
-            text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-            text = re.sub(r"\{\{[^}]+\}\}", "확인 내용", text)
-            path = filled / folder / "2026-10-07-filled.md"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-        filled_errors = check_posts(filled)
-        if filled_errors:
-            failures.append("filled templates rejected: " + "; ".join(filled_errors))
+        category_docs = Path(tmp) / "categories"
+        for index, category in enumerate(CATEGORIES, start=1):
+            write_post(
+                category_docs,
+                f"notes/2026-10-0{index}-sample.md",
+                f"title: 확인 {index}\nsummary: 짧은 요약\ndate: 2026-10-0{index}\ncategory: {category}\ntags:\n  - Linux\n",
+                valid_body(category),
+            )
+        category_errors = check_posts(category_docs)
+        if category_errors:
+            failures.append("valid categories rejected: " + "; ".join(category_errors))
 
     if failures:
         for failure in failures:

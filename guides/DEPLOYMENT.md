@@ -8,7 +8,7 @@
 
 1. [AGENTS.md](../AGENTS.md), 이 문서, 비슷한 기존 글을 확인.
 2. 자료를 검토하고 분류·제목·구성·공개 범위·게시 여부를 제안. **본문 작성 전에 답변을 기다림.** 승인된 제안이 이미 있으면 반복하지 않음. 초안·검토 요청은 게시 제외.
-3. [templates/](../templates/post.md)의 해당 파일로 작성. 해당 없는 절과 자리표시자는 제거.
+3. 자료에 맞춰 글을 구성하고 [문서 표현 표준](FORMATTING.md) 적용. 기준 글의 목차를 복제하거나 빈 양식을 채우지 않는다.
 4. 근거, 익명화, 문체를 검토. 이미지의 민감정보도 확인.
 5. `uv run python scripts/check_posts.py --self-test`, `uv run python scripts/check_posts.py`, `uv run mkdocs build --strict`.
 6. 이번 글과 직접 관련된 diff만 확인.

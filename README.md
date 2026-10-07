@@ -29,6 +29,7 @@ OpenStack · Ceph · Monitoring · Automation
 ## 작성·운영
 
 - [작성 규칙](guides/WRITING.md)
+- [문서 표현 표준](guides/FORMATTING.md): 요약·그림·강조·들여쓰기·코드 작성 기준
 - [로컬 운영](guides/OPERATIONS.md)
 - [배포](guides/DEPLOYMENT.md)
 
