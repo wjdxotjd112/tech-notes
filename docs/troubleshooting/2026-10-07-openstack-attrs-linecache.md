@@ -107,18 +107,16 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 ## 3. 원인 분석
 
+<p class="subsection-title"><strong>3-1. 원인을 좁힌 과정</strong></p>
+
 <div class="section-body" markdown="1">
 
 API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서로 확인.
 
 </div>
 
-!!! danger "결론 — attrs의 동일 소스 중복 저장이 API 지연의 원인"
-    **같은 보조 소스를 다른 파일명으로 계속 저장**하면서 worker 메모리와 이름 탐색 비용 증가. 문제 노드의 높은 CPU·메모리와 지연을 설명하는 병목으로 판단.
-    코드 추적에서 해당 경로의 반복 실행을 확인했고, 수정 전후 시험으로 중복 저장 방지 동작 검증.
-
 <details class="analysis-toggle" markdown="1">
-<summary>3-1. API 버전 때문에 추가 작업이 생긴 것은 아닐까?</summary>
+<summary>3-1-1. API 버전 때문에 추가 작업이 생긴 것은 아닐까?</summary>
 
 **의심한 이유:** Nova는 API 버전에 따라 처리 내용이 달라질 수 있어, 특정 버전의 추가 작업이 지연을 만드는지 확인 필요.
 
@@ -130,7 +128,7 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 </details>
 
 <details class="analysis-toggle" markdown="1">
-<summary>3-2. 로드밸런서를 우회해도 느릴까?</summary>
+<summary>3-1-2. 로드밸런서를 우회해도 느릴까?</summary>
 
 **의심한 이유:** API 앞단의 HAProxy에서 요청을 중계·분배하는 시간이 길어질 가능성.
 
@@ -144,7 +142,7 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 </details>
 
 <details class="analysis-toggle" markdown="1">
-<summary>3-3. 요청이 많아서 처리하지 못하는 상황일까?</summary>
+<summary>3-1-3. 요청이 많아서 처리하지 못하는 상황일까?</summary>
 
 **의심한 이유:** 문제 노드에 요청이 몰리면 worker가 바빠지고 뒤의 요청도 지연될 가능성.
 
@@ -159,7 +157,7 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 </details>
 
 <details class="analysis-toggle" markdown="1">
-<summary>3-4. DB나 캐시 응답을 기다리는 것은 아닐까?</summary>
+<summary>3-1-4. DB나 캐시 응답을 기다리는 것은 아닐까?</summary>
 
 **의심한 이유:** 토큰 발급에는 사용자·권한 조회가 있어 DB나 캐시 연결 대기도 후보. 같은 DB를 사용하더라도 노드별 통신 경로는 다를 수 있음. LDAP은 미사용.
 
@@ -171,7 +169,7 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 </details>
 
 <details class="analysis-toggle" markdown="1">
-<summary>3-5. Python 안에서는 어떤 작업이 반복될까?</summary>
+<summary>3-1-5. Python 안에서는 어떤 작업이 반복될까?</summary>
 
 **의심한 이유:** 높은 `%usr`와 짧은 통신 대기는 Python 내부의 반복 연산을 의심할 근거. strace로는 문자열 생성·캐시 검색 같은 프로그램 내부 연산 확인이 어려움.
 
@@ -190,6 +188,95 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 
 
 </details>
+
+<div class="section-body" markdown="1">
+
+관찰한 통신 대기와 요청량 차이만으로 지연을 설명하기 어려운 상황. **Python 실행 추적에서 이름 생성 함수의 반복 호출과 메모리 증가가 함께 관찰**돼, 생성 코드의 보관 경로로 조사 범위 축소.
+
+</div>
+
+<p class="subsection-title"><strong>3-2. 확인한 원인 — 같은 검사 코드의 중복 등록</strong></p>
+
+<div class="section-body" markdown="1">
+
+추적한 함수가 토큰 발급에서 호출되는 이유와, 생성 소스의 중복 등록이 CPU·메모리 비용으로 이어지는 과정을 연결.
+
+**토큰 발급에서 입력값 검사가 필요한 이유**
+
+`openstack token issue`는 Keystone의 `POST /v3/auth/tokens` 호출을 통해 토큰 발급 요청. 인증 방식·사용자·프로젝트 등의 정보는 JSON 형식으로 전달.
+
+Keystone은 **JSON을 읽은 뒤 입력 데이터의 구조가 맞는지 먼저 검사**, 이후 실제 사용자 인증과 토큰 발급 진행. 예를 들어 필요한 항목이 빠졌거나 자료형이 잘못된 요청을 걸러내는 단계.
+
+이 검사 규칙이 **스키마(schema)**, 규칙에 따라 입력을 확인하는 도구가 **Validator**.
+
+[Keystone Caracal의 토큰 발급 코드](https://github.com/openstack/keystone/blob/24.0.0/keystone/api/auth.py)에서 확인한 순서:
+
+```python title="keystone/api/auth.py — 토큰 발급 처리 일부" hl_lines="2"
+auth_data = self.request_body_json.get('auth')
+auth_schema.validate_issue_token_auth(auth_data)
+token = authentication.authenticate_for_token(auth_data)
+```
+
+!!! tip "코드에서 확인할 핵심"
+    강조된 **두 번째 줄이 스키마 검증의 진입점**. 실제 사용자 인증 전에 실행되는 검사이며, 이 과정에서 검사 도구의 보조 코드 생성·보관 발생.
+
+**검사 도구 준비 과정에서 코드 생성**
+
+스키마 검증은 Keystone의 `SchemaValidator`를 거쳐 Python 라이브러리 **jsonschema**로 연결. jsonschema는 이 경로에서 `extend()` → `create()`를 호출해 새 Validator 클래스 생성.
+
+클래스는 객체의 데이터와 기능을 정의한 설계도. 여기서는 검사 도구의 설계도를 요청 처리 중 새로 만드는 방식이라 **동적 클래스 생성**으로 표현.
+
+새 클래스에는 초기화나 비교 같은 기본 기능도 필요. `@attr.s`는 **attrs라는 보조 라이브러리에 해당 코드 생성을 맡기는 표시**.
+
+| 생성되는 코드 | 필요한 이유 |
+| --- | --- |
+| `__init__` | 검사 도구를 만들 때 사용할 스키마 등 초기값 설정 |
+| `__eq__` | 객체 간 동등성 비교. attrs의 기본 생성 기능 |
+| `__hash__` | 해시 기능을 사용하는 클래스에서 생성. 이번 수정 범위에도 포함 |
+
+“입력값을 검사하는 일”에 앞서 “검사 도구를 준비하는 일”이 있고, **이번 병목은 준비 과정에서 만들어진 코드의 보관 방식**.
+
+**생성 코드를 linecache에 보관하는 이유**
+
+- **생성:** attrs가 메서드 소스를 문자열로 만들고 실행 가능한 Python 코드로 변환.
+- **보관 이유:** 실제 파일에서 읽은 코드가 아니므로, 오류 분석·디버깅 때 소스를 표시하려면 별도 보관 필요.
+- **보관 위치:** Python의 **linecache**에 가상 파일명을 붙여 저장. 디스크 파일이 아니라 **각 worker의 메모리에 소스 문자열과 관련 정보를 보관**. 외부 Memcached와는 별개.
+
+**같은 소스의 반복 등록으로 두 가지 비용 증가**
+
+오류 분석을 위해 생성 소스를 linecache에 보관하는 기능은 정상적인 용도. **기존 구현은 이미 같은 소스가 있어도 재사용하지 않고 `Validator-2`, `Validator-3`처럼 다른 이름으로 반복 보관.** 이 중복과 이름 탐색 비용이 누적되는 것이 문제.
+
+<figure class="flow">
+  <ol>
+    <li>검사 코드 생성</li>
+    <li>빈 이름 탐색</li>
+    <li>새 항목으로 보관</li>
+  </ol>
+  <ul>
+    <li>같은 소스도 다른 번호로 반복 저장.</li>
+  </ul>
+</figure>
+
+기존 `_generate_unique_filename()`은 UUID라는 식별 값으로 이름을 예약하고, 이미 사용된 이름이면 `-2`·`-3` 등을 처음부터 탐색. **생성 소스가 같은지 비교해 재사용하는 처리 부재.**
+
+그래서 두 가지 비용이 함께 증가:
+
+1. **메모리 증가:** 같은 메서드 소스를 반복 보관.
+2. **CPU 비용 증가:** 다음 코드를 등록할 때 앞의 이름들을 다시 탐색.
+
+이미 많은 항목을 보유한 worker라면 요청이 적어도 한 번의 준비 작업에 큰 비용 발생. 현재 트래픽 규모가 비슷한데 문제 노드만 느린 현상과 연결되는 이유.
+
+관련 소스: [Keystone 검증 연결](https://github.com/openstack/keystone/blob/24.0.0/keystone/auth/schema.py), [Keystone SchemaValidator](https://github.com/openstack/keystone/blob/24.0.0/keystone/common/validation/validators.py), [jsonschema 4.16.0 클래스 생성](https://github.com/python-jsonschema/jsonschema/blob/v4.16.0/jsonschema/validators.py), [attrs 20.3.0 이름 생성](https://github.com/python-attrs/attrs/blob/20.3.0/src/attr/_make.py#L1429-L1456).
+
+!!! danger "결론 — 동일 소스의 중복 등록과 이름 탐색 비용 누적"
+    **같은 검사 코드를 재사용하지 않고 새 이름으로 반복 등록하는 구현이 병목.** 소스 보관에 따른 메모리 증가와 이름 탐색에 따른 CPU 비용 증가가 함께 발생해, 문제 노드의 높은 CPU·메모리와 API 지연을 설명하는 원인으로 판단.
+    Python 실행 추적으로 해당 경로의 반복 호출을 확인했고, 다음 절의 수정 전후 시험에서 동일 소스의 중복 등록 방지 동작 검증.
+
+문제 노드에 더 많이 누적된 정확한 과거 호출·가동 이력은 별도 확인 대상.
+
+**해결 방향:** 코드 생성과 디버깅용 소스 보관 기능은 유지하면서, 이미 같은 소스가 있으면 기존 항목을 재사용하도록 수정. 다음 절에서 백포트 내용과 검증 결과 확인.
+
+</div>
 
 ??? note "사용한 진단 명령 — 목적·옵션·결과 읽기"
     !!! warning "실행 전 확인"
@@ -258,91 +345,6 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
     **읽는 방법:** 요약 비율은 선택한 syscall의 집계 시간 비중이며 프로세스 CPU 사용률이 아님. `epoll_wait`가 100%라는 이유만으로 반복 연산이나 timeout 확정 불가.
 
     perf의 라이브러리 분석은 실행 위치를 좁히는 과정, Python USDT는 함수 호출 경로 확인용. 함수 진입 이벤트 수가 CPU 사용시간은 아니며 임시 probe는 수집 후 제거.
-
-
-<p class="subsection-title"><strong>3-6. 토큰 발급 요청에도 입력값 검사가 필요</strong></p>
-
-<div class="section-body" markdown="1">
-
-`openstack token issue`는 Keystone의 `POST /v3/auth/tokens` 호출을 통해 토큰 발급 요청. 인증 방식·사용자·프로젝트 등의 정보는 JSON 형식으로 전달.
-
-Keystone은 **JSON을 읽은 뒤 입력 데이터의 구조가 맞는지 먼저 검사**, 이후 실제 사용자 인증과 토큰 발급 진행. 예를 들어 필요한 항목이 빠졌거나 자료형이 잘못된 요청을 걸러내는 단계.
-
-이 검사 규칙이 **스키마(schema)**, 규칙에 따라 입력을 확인하는 도구가 **Validator**.
-
-[Keystone Caracal의 토큰 발급 코드](https://github.com/openstack/keystone/blob/24.0.0/keystone/api/auth.py)에서 확인한 순서:
-
-```python title="keystone/api/auth.py — 토큰 발급 처리 일부" hl_lines="2"
-auth_data = self.request_body_json.get('auth')
-auth_schema.validate_issue_token_auth(auth_data)
-token = authentication.authenticate_for_token(auth_data)
-```
-
-!!! tip "코드에서 확인할 핵심"
-    강조된 **두 번째 줄이 스키마 검증의 진입점**. 실제 사용자 인증 전에 실행되는 검사이며, 이 과정에서 검사 도구의 보조 코드 생성·보관 발생.
-
-</div>
-
-<p class="subsection-title"><strong>3-7. 검사 도구를 준비하면서 보조 코드 생성</strong></p>
-
-<div class="section-body" markdown="1">
-
-스키마 검증은 Keystone의 `SchemaValidator`를 거쳐 Python 라이브러리 **jsonschema**로 연결. jsonschema는 이 경로에서 `extend()` → `create()`를 호출해 새 Validator 클래스 생성.
-
-클래스는 객체의 데이터와 기능을 정의한 설계도. 여기서는 검사 도구의 설계도를 요청 처리 중 새로 만드는 방식이라 **동적 클래스 생성**으로 표현.
-
-새 클래스에는 초기화나 비교 같은 기본 기능도 필요. `@attr.s`는 **attrs라는 보조 라이브러리에 해당 코드 생성을 맡기는 표시**.
-
-| 생성되는 코드 | 필요한 이유 |
-| --- | --- |
-| `__init__` | 검사 도구를 만들 때 사용할 스키마 등 초기값 설정 |
-| `__eq__` | 객체 간 동등성 비교. attrs의 기본 생성 기능 |
-| `__hash__` | 해시 기능을 사용하는 클래스에서 생성. 이번 수정 범위에도 포함 |
-
-“입력값을 검사하는 일”에 앞서 “검사 도구를 준비하는 일”이 있고, **이번 병목은 준비 과정에서 만들어진 코드의 보관 방식**.
-
-</div>
-
-<p class="subsection-title"><strong>3-8. 왜 생성한 코드를 메모리에 보관할까?</strong></p>
-
-<div class="section-body" markdown="1">
-
-- **생성:** attrs가 메서드 소스를 문자열로 만들고 실행 가능한 Python 코드로 변환.
-- **보관 이유:** 실제 파일에서 읽은 코드가 아니므로, 오류 분석·디버깅 때 소스를 표시하려면 별도 보관 필요.
-- **보관 위치:** Python의 **linecache**에 가상 파일명을 붙여 저장. 디스크 파일이 아니라 **각 worker의 메모리에 소스 문자열과 관련 정보를 보관**. 외부 Memcached와는 별개.
-
-</div>
-
-<p class="subsection-title"><strong>3-9. 문제는 보관 자체가 아니라 동일 소스의 중복 등록</strong></p>
-
-<div class="section-body" markdown="1">
-
-!!! warning "같은 내용을 다른 번호로 계속 저장"
-    오류 분석을 위해 생성 소스를 linecache에 보관하는 기능은 정상적인 용도. **기존 구현은 이미 같은 소스가 있어도 재사용하지 않고 `Validator-2`, `Validator-3`처럼 다른 이름으로 반복 보관.** 이 중복과 이름 탐색 비용이 누적되는 것이 문제.
-
-<figure class="flow">
-  <ol>
-    <li>검사 코드 생성</li>
-    <li>빈 이름 탐색</li>
-    <li>새 항목으로 보관</li>
-  </ol>
-  <ul>
-    <li>같은 소스도 다른 번호로 반복 저장.</li>
-  </ul>
-</figure>
-
-기존 `_generate_unique_filename()`은 UUID라는 식별 값으로 이름을 예약하고, 이미 사용된 이름이면 `-2`·`-3` 등을 처음부터 탐색. **생성 소스가 같은지 비교해 재사용하는 처리 부재.**
-
-그래서 두 가지 비용이 함께 증가:
-
-1. **메모리 증가:** 같은 메서드 소스를 반복 보관.
-2. **CPU 비용 증가:** 다음 코드를 등록할 때 앞의 이름들을 다시 탐색.
-
-이미 많은 항목을 보유한 worker라면 요청이 적어도 한 번의 준비 작업에 큰 비용 발생. 현재 트래픽 규모가 비슷한데 문제 노드만 느린 현상과 연결되는 이유. 다만 문제 노드에 더 많이 누적된 정확한 과거 호출·가동 이력은 별도 확인 대상.
-
-관련 소스: [Keystone 검증 연결](https://github.com/openstack/keystone/blob/24.0.0/keystone/auth/schema.py), [Keystone SchemaValidator](https://github.com/openstack/keystone/blob/24.0.0/keystone/common/validation/validators.py), [jsonschema 4.16.0 클래스 생성](https://github.com/python-jsonschema/jsonschema/blob/v4.16.0/jsonschema/validators.py), [attrs 20.3.0 이름 생성](https://github.com/python-attrs/attrs/blob/20.3.0/src/attr/_make.py#L1429-L1456).
-
-</div>
 
 ---
 
