@@ -23,56 +23,55 @@ figure_lines:
 
 ---
 
-## 환경과 요청 처리 구조
+## 1. 환경과 요청 처리 구조
 
-### 운영 환경과 검증 환경
+<div class="environment-section" markdown="1">
 
-| 항목 | 지연이 발생한 운영 환경 | 코드 수정 검증 환경 |
-| --- | --- | --- |
-| OS | **RHEL 9.4** | Rocky Linux 9.6 |
-| OpenStack | **Caracal** | 코드 추적에 사용한 Nova는 Epoxy 31.0.0 |
-| Python | Python 3.9 계열 | Python 3.9.21 |
-| 문제 패키지 | **`python3-attrs-20.3.0-7.el9.noarch`** | 동일 attrs RPM에 수정 반영 |
-| jsonschema | 운영 설치 버전은 별도 기록 없음 | 4.16.0 |
-| API 구성 | HAProxy 앞단 · Controller 3대 | 별도 테스트 노드에서 수정 전후 비교 |
-| Keystone 프로세스 | 각 Controller에서 worker 6개 관찰 | 별도 Python 프로세스와 실제 API로 검증 |
-
-OS·OpenStack 버전이 다르므로 **검증 환경의 결과는 누적 방지 동작 확인에 사용**, 운영 환경의 응답시간 측정과는 구분.
-
-### HAProxy와 Controller 구성
-
-[![HAProxy가 세 Controller로 요청을 분배하며 Controller C에서만 API 지연 발생](../assets/openstack-attrs-linecache/controller-topology.svg){ .architecture-diagram }](../assets/openstack-attrs-linecache/controller-topology.svg)
-
-그림 1. 분석 대상의 API 요청 경로. 화살표는 요청 전달 방향. 그림을 누르면 확대 가능.
-
-**Controller는 OpenStack API 요청을 받는 관리 서버**, HAProxy는 요청을 각 Controller로 분배하는 앞단. 정상 노드는 A/B, 문제 노드는 C.
-
-목록 조회에 관련된 서비스는 다음 두 가지.
-
-| 서비스 | 역할 |
+| 항목 | 운영 환경 |
 | --- | --- |
-| **Keystone** | 사용자 인증과 토큰 발급. 토큰은 이후 API 호출에 붙이는 인증 증명 |
-| **Nova API** | 가상머신과 하이퍼바이저 조회 등 Compute 기능 제공 |
+| OS | RHEL 9.4 |
+| OpenStack | Caracal |
+| Python | 3.9 계열 |
+| attrs 패키지 | `python3-attrs-20.3.0-7.el9.noarch` |
+| Keystone worker | Controller마다 6개 |
 
-하이퍼바이저는 가상머신을 실행하는 호스트 측 구성 요소. 대시보드에서 하이퍼바이저 목록을 조회하려면 Nova API 호출이 필요하고, CLI 호출에도 Keystone에서 받은 인증 토큰이 필요.
+<div class="environment-grid" markdown="1">
 
-따라서 느린 구간은 **인증 과정인지, 실제 목록 조회인지 나눠서 확인**할 필요.
+<div markdown="1">
 
-### 요청 하나를 처리하는 흐름
+**Controller 구성**
 
-[![토큰 발급 요청을 받은 worker가 검사 도구를 준비하며 attrs 보조 소스를 linecache에 보관한 뒤 입력 검사와 인증 수행](../assets/openstack-attrs-linecache/token-request-flow.svg){ .architecture-diagram }](../assets/openstack-attrs-linecache/token-request-flow.svg)
+[![HAProxy와 세 Controller의 API 구성](../assets/openstack-attrs-linecache/controller-topology.svg){ .architecture-diagram }](../assets/openstack-attrs-linecache/controller-topology.svg)
 
-그림 2. 토큰 발급의 주요 처리 순서. 상세 DB·권한 조회는 생략, 코드 보관이 발생하는 위치를 주황색으로 표시.
+</div>
 
-**worker는 요청을 실제로 처리하는 프로세스**, PID는 운영체제가 부여한 프로세스 식별 번호. 한 서비스가 여러 worker를 실행해 요청을 나눠 처리하는 구성.
+<div markdown="1">
 
-당시 Keystone worker는 노드마다 6개. OpenStack의 고정 개수가 아니라 해당 환경에서 확인한 실행 구성. 요청을 받은 worker에 따라 CPU 사용량이 달라져 **6개 전체를 함께 관찰**.
+**토큰 발급 흐름**
 
-각 worker의 메모리는 독립적. 그림의 **linecache는 worker 안에 생성 소스를 보관하는 Python 캐시**이며, 외부 Memcached나 서버 전체가 공유하는 캐시와는 별개. 자세한 생성·보관 원리는 아래 원인 분석에서 설명.
+[![Keystone worker의 토큰 발급 처리 순서](../assets/openstack-attrs-linecache/token-request-flow.svg){ .architecture-diagram }](../assets/openstack-attrs-linecache/token-request-flow.svg)
+
+</div>
+
+</div>
+
+<div class="section-body" markdown="1">
+
+- **HAProxy:** 앞단에서 각 Controller로 API 요청 분배.
+- **Keystone:** 사용자 인증과 토큰 발급. **Nova API:** 가상머신·하이퍼바이저 조회.
+- **worker:** 요청 처리 프로세스. **PID:** 프로세스 식별 번호. 요청에 따라 CPU가 높은 worker가 달라져 6개 전체 관찰.
+- **linecache:** 각 worker의 메모리에 생성 소스를 보관하는 Python 캐시. 외부 Memcached와는 별개.
+- 목록 조회는 Keystone 인증 토큰을 받아 Nova API를 호출하는 흐름. 인증과 실제 조회 시간을 나눠 확인.
+
+</div>
+
+</div>
 
 ---
 
-## 대시보드 조회 지연과 노드별 차이
+## 2. 증상과 영향
+
+<div class="section-body" markdown="1">
 
 사내 대시보드에는 **`/os-hypervisors/detail`을 주기적으로 호출하는 로직** 존재. 해당 조회가 느려져 분석 시작, `nova-api.log`에서도 약 10초의 처리시간 확인.
 
@@ -90,15 +89,16 @@ RSS는 프로세스가 실제 물리 메모리에 보유한 메모리 크기. �
 
 API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. CLI에는 인증과 클라이언트 처리도 포함될 수 있으므로 시간 차이를 그대로 한 구간의 비용으로 계산하지 않음.
 
+</div>
+
 ---
 
-## 원인을 좁힌 과정
+## 3. 원인 분석
 
 조회 API → 요청 분배 → 트래픽 → 외부 응답 대기 → Python 실행 순서로 범위를 축소. **각 단계에서 지연을 설명할 수 있는지 확인하고 다음 조사 대상 결정.**
 
-<section class="investigation-step" markdown="1">
-
-### API 버전 때문에 추가 작업이 생긴 것은 아닐까?
+<details class="analysis-toggle" markdown="1">
+<summary>3-1. API 버전 때문에 추가 작업이 생긴 것은 아닐까?</summary>
 
 **의심한 이유:** Nova는 API 버전에 따라 처리 내용이 달라질 수 있어, 특정 버전의 추가 작업이 지연을 만드는지 확인 필요.
 
@@ -106,11 +106,11 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 **판단:** 2.88의 uptime 관련 추가 처리만으로 설명하기 어려워, 공통 인증·API 처리 경로로 조사 범위 이동.
 
-</section>
 
-<section class="investigation-step" markdown="1">
+</details>
 
-### 로드밸런서를 우회해도 느릴까?
+<details class="analysis-toggle" markdown="1">
+<summary>3-2. 로드밸런서를 우회해도 느릴까?</summary>
 
 **의심한 이유:** API 앞단의 HAProxy에서 요청을 중계·분배하는 시간이 길어질 가능성.
 
@@ -120,11 +120,11 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 `GET /v3`는 API 버전·서비스 정보 확인에 쓰이는 가벼운 요청. 토큰 발급 POST는 인증 데이터를 받아 검사와 인증을 수행하므로, GET이 빠르다는 사실만으로 토큰 발급 경로까지 정상이라고 판단할 수 없음.
 
-</section>
 
-<section class="investigation-step" markdown="1">
+</details>
 
-### 요청이 많아서 처리하지 못하는 상황일까?
+<details class="analysis-toggle" markdown="1">
+<summary>3-3. 요청이 많아서 처리하지 못하는 상황일까?</summary>
 
 **의심한 이유:** 문제 노드에 요청이 몰리면 worker가 바빠지고 뒤의 요청도 지연될 가능성.
 
@@ -134,11 +134,11 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 6개 PID 자체는 유지됐지만 CPU가 높은 worker는 기존 프로세스 사이에서 교대. 요청을 받은 worker가 비싼 작업을 수행하는 상황과 맞는 모습. 실제로 POST는 계속 유입되고 있었으므로 완전한 무요청 상태는 아님.
 
-</section>
 
-<section class="investigation-step" markdown="1">
+</details>
 
-### DB나 캐시 응답을 기다리는 것은 아닐까?
+<details class="analysis-toggle" markdown="1">
+<summary>3-4. DB나 캐시 응답을 기다리는 것은 아닐까?</summary>
 
 **의심한 이유:** 토큰 발급에는 사용자·권한 조회가 있어 DB나 캐시 연결 대기도 후보. 같은 DB를 사용하더라도 노드별 통신 경로는 다를 수 있음. LDAP은 미사용.
 
@@ -146,11 +146,11 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 **판단:** `%usr`는 프로그램 코드 실행에 사용한 CPU 비율. 외부 응답 대기보다 Python 안의 연산을 추적할 필요. 단, 이번 수집만으로 모든 I/O 문제를 배제한 것은 아님.
 
-</section>
 
-<section class="investigation-step" markdown="1">
+</details>
 
-### Python 안에서는 어떤 작업이 반복될까?
+<details class="analysis-toggle" markdown="1">
+<summary>3-5. Python 안에서는 어떤 작업이 반복될까?</summary>
 
 **의심한 이유:** 높은 `%usr`와 짧은 통신 대기는 Python 내부의 반복 연산을 의심할 근거. strace로는 문자열 생성·캐시 검색 같은 프로그램 내부 연산 확인이 어려움.
 
@@ -162,17 +162,15 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 - `uuid.py`의 **`__str__()`** — 이름 예약에 쓰는 식별 값을 문자열로 변환.
 - `<attrs generated ... Validator-N>` — 검사 도구의 생성 소스에 붙은 가상 파일명.
 
-문제 노드의 생성 파일명 번호는 약 **69만**, 정상 노드는 약 **2만** 수준. 메모리에서도 `RssAnon`·`Anonymous`·`Private_Dirty`·`VmData` 증가. 공유 라이브러리만 커진 것이 아니라 프로세스의 사유·익명 메모리가 늘어난 상황.
+문제 노드의 생성 파일명 번호는 약 **69만**, 정상 노드는 약 **2만** 수준. 여기서 `Validator-N`의 N은 생성 소스의 파일명 번호이며, 살아 있는 객체 개수나 캐시 항목을 직접 센 값은 아님. 메모리에서도 `RssAnon`·`Anonymous`·`Private_Dirty`·`VmData` 증가. 공유 라이브러리만 커진 것이 아니라 프로세스의 사유·익명 메모리가 늘어난 상황.
 
 **판단:** 큰 번호의 생성 소스, 이름 생성 함수의 반복 실행, 프로세스 메모리 증가가 함께 관찰돼 코드 생성·보관 경로로 범위 축소.
 
-</section>
+
+</details>
 
 !!! tip "원인 후보를 좁힌 핵심 근거"
     높은 CPU만으로 attrs 결함을 확정한 것은 아님. **실행 위치가 attrs의 이름 생성 경로에 집중**되고, **생성 소스 번호와 메모리 사용량도 크게 증가**한 점을 함께 확인. 이후 실제 소스 분석과 수정 전후 시험으로 중복 보관 동작 검증.
-
-!!! note "이 번호가 뜻하는 것"
-    `Validator-N`의 N은 생성한 코드에 붙인 파일명 번호. 살아 있는 객체 개수나 linecache 항목을 직접 센 값은 아님. 번호가 계속 커지는 현상을 단서로 삼고, 실제 코드와 별도 시험으로 누적 원리 확인.
 
 ??? note "사용한 진단 명령 — 목적·옵션·결과 읽기"
     !!! warning "실행 전 확인"
@@ -244,9 +242,11 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 
 ---
 
-## 요청을 검사하는 과정에서 코드가 쌓인 이유
+## 4. 동일 소스가 누적되는 원리
 
-### 토큰 발급 요청에도 입력값 검사가 필요
+<p class="subsection-title"><strong>4-1. 토큰 발급 요청에도 입력값 검사가 필요</strong></p>
+
+<div class="section-body" markdown="1">
 
 `openstack token issue`는 Keystone의 `POST /v3/auth/tokens` 호출을 통해 토큰 발급 요청. 인증 방식·사용자·프로젝트 등의 정보는 JSON 형식으로 전달.
 
@@ -265,7 +265,11 @@ token = authentication.authenticate_for_token(auth_data)
 !!! tip "코드에서 확인할 핵심"
     강조된 **두 번째 줄이 스키마 검증의 진입점**. 실제 사용자 인증 전에 실행되는 검사이며, 이 과정에서 검사 도구의 보조 코드 생성·보관 발생.
 
-### 검사 도구를 준비하면서 보조 코드 생성
+</div>
+
+<p class="subsection-title"><strong>4-2. 검사 도구를 준비하면서 보조 코드 생성</strong></p>
+
+<div class="section-body" markdown="1">
 
 스키마 검증은 Keystone의 `SchemaValidator`를 거쳐 Python 라이브러리 **jsonschema**로 연결. jsonschema는 이 경로에서 `extend()` → `create()`를 호출해 새 Validator 클래스 생성.
 
@@ -281,13 +285,21 @@ token = authentication.authenticate_for_token(auth_data)
 
 “입력값을 검사하는 일”에 앞서 “검사 도구를 준비하는 일”이 있고, **이번 병목은 준비 과정에서 만들어진 코드의 보관 방식**.
 
-### 왜 생성한 코드를 메모리에 보관할까?
+</div>
+
+<p class="subsection-title"><strong>4-3. 왜 생성한 코드를 메모리에 보관할까?</strong></p>
+
+<div class="section-body" markdown="1">
 
 attrs는 메서드 소스를 문자열로 만든 다음 실행 가능한 Python 코드로 변환. 이 소스는 실제 파일에서 읽은 것이 아니므로, 오류나 디버깅 시 내용을 표시하려면 별도 보관이 필요.
 
 Python의 **linecache**가 그 역할을 담당. `<attrs generated init ... Validator>` 같은 가상 파일명을 붙이고 생성 소스 저장. 실제 디스크 파일을 만드는 것이 아니라 **프로세스 메모리에 소스 문자열과 관련 정보를 보관**.
 
-### 문제는 보관 자체가 아니라 동일 소스의 중복 등록
+</div>
+
+<p class="subsection-title"><strong>4-4. 문제는 보관 자체가 아니라 동일 소스의 중복 등록</strong></p>
+
+<div class="section-body" markdown="1">
 
 !!! warning "같은 내용을 다른 번호로 계속 저장"
     오류 분석을 위해 생성 소스를 linecache에 보관하는 기능은 정상적인 용도. **기존 구현은 이미 같은 소스가 있어도 재사용하지 않고 `Validator-2`, `Validator-3`처럼 다른 이름으로 반복 보관.** 이 중복과 이름 탐색 비용이 누적되는 것이 문제.
@@ -314,9 +326,13 @@ Python의 **linecache**가 그 역할을 담당. `<attrs generated init ... Vali
 
 관련 소스: [Keystone 검증 연결](https://github.com/openstack/keystone/blob/24.0.0/keystone/auth/schema.py), [Keystone SchemaValidator](https://github.com/openstack/keystone/blob/24.0.0/keystone/common/validation/validators.py), [jsonschema 4.16.0 클래스 생성](https://github.com/python-jsonschema/jsonschema/blob/v4.16.0/jsonschema/validators.py), [attrs 20.3.0 이름 생성](https://github.com/python-attrs/attrs/blob/20.3.0/src/attr/_make.py#L1429-L1456).
 
+</div>
+
 ---
 
-## 코드 수정 — 같은 소스는 기존 항목 재사용
+## 5. 코드 수정
+
+<div class="section-body" markdown="1">
 
 이미 공개된 [attrs 수정 #828](https://github.com/python-attrs/attrs/commit/38580632ceac1cd6e477db71e1d190a4130beed4)을 기존 20.3.0 코드에 반영. **기존 버전을 유지하면서 필요한 수정만 가져오는 백포트** 방식.
 
@@ -348,19 +364,27 @@ GitHub 변경 커밋은 `_make.py` 한 파일만 수정. 좌우 비교를 선택
 | `_make_method()` | 이름과 소스 내용 비교, 동일 항목 재사용 |
 | `_make_init()`·`_make_eq()`·`_make_hash()` | 공통 생성·보관 경로 사용 |
 
+</div>
+
 ---
 
-## 검증 — 같은 검사를 준비해도 보관 항목이 늘지 않을까?
+## 6. 수정 전후 검증
 
-### 왜 API를 수십만 번 호출하지 않았는지
+<p class="subsection-title"><strong>6-1. 왜 API를 수십만 번 호출하지 않았는지</strong></p>
+
+<div class="section-body" markdown="1">
 
 HTTP 요청 전체에는 인증, DB, 네트워크, worker 분배 등 여러 요인 포함. 이번 수정이 겨냥한 부분은 **검사 도구 준비 시 같은 소스가 중복 보관되는지 여부**.
 
-따라서 Keystone이 실제로 사용하는 `SchemaValidator`의 생성 경로만 분리해 10회 반복. 원본과 수정본이 같은 일을 수행할 때 코드 보관 항목이 계속 늘어나는지 비교.
+별도 Rocky Linux 9.6 테스트 노드에서 Keystone이 사용하는 `SchemaValidator`의 생성 경로만 분리해 10회 반복. 원본과 수정본이 같은 일을 수행할 때 코드 보관 항목이 계속 늘어나는지 비교.
 
 10회는 **누적 방식이 바뀌었는지 확인하기 위한 횟수**, 운영 성능이나 장기 안정성을 모두 검증하기 위한 부하량은 아님.
 
-### 숫자 2개와 20개가 의미하는 것
+</div>
+
+<p class="subsection-title"><strong>6-2. 숫자 2개와 20개가 의미하는 것</strong></p>
+
+<div class="section-body" markdown="1">
 
 이 시험에서는 검사 도구를 한 번 준비할 때 `__init__`와 `__eq__`의 소스가 한 항목씩 생성돼 최초 **2개** 등록.
 
@@ -439,9 +463,13 @@ API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 �
 
     **수정본의 확인 기준:** `2,2,2,2,2,2,2,2,2,2`처럼 최초 등록 이후 항목 수 유지. 이 명령은 새 시험 프로세스만 사용하며 실행 중인 Keystone worker의 캐시를 지우지 않음.
 
+</div>
+
 ---
 
-## 운영 반영과 재발 방지
+## 7. 운영 반영과 재발 방지
+
+<div class="section-body" markdown="1">
 
 **worker 재기동만으로도 누적된 메모리가 초기화돼 일시적으로 빨라질 수 있음.** 하지만 원본 코드가 남아 있으면 같은 조건에서 다시 누적 가능. 재기동은 임시 완화, 백포트는 누적 방식 수정.
 
@@ -454,9 +482,13 @@ API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 �
 
 운영 반영 후에는 같은 API의 응답시간과 worker CPU·RSS를 확인하고, 시간이 지나도 다시 증가하지 않는지 관찰. **재기동 직후가 아니라 반복 요청 이후의 상태까지 확인**하는 것이 재발 방지의 핵심.
 
+</div>
+
 ---
 
-## 비슷한 사례와 참고 자료
+## 8. 관련 사례와 참고 자료
+
+<div class="section-body" markdown="1">
 
 - [attrs Issue #826](https://github.com/python-attrs/attrs/issues/826): 같은 이름의 클래스를 반복 생성할수록 처리 비용이 커진 문제.
 - [attrs 수정 #828](https://github.com/python-attrs/attrs/commit/38580632ceac1cd6e477db71e1d190a4130beed4): 동일 생성 소스의 보관 항목 재사용.
@@ -464,3 +496,5 @@ API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 �
 - [Ubuntu Jammy 수정 패키지](https://bugs.launchpad.net/nova/+bug/2121607/comments/18): 기존 21.2.0에 수정사항을 백포트한 `21.2.0-1ubuntu1`. [2025년 12월 9일 업데이트 배포 완료](https://bugs.launchpad.net/nova/+bug/2121607/comments/17).
 - [strace 옵션 설명](https://man7.org/linux/man-pages/man1/strace.1.html) · [pidstat 옵션 설명](https://man7.org/linux/man-pages/man1/pidstat.1.html).
 - [백포트 코드의 attrs MIT 라이선스](../assets/openstack-attrs-linecache/UPSTREAM_LICENSE.txt).
+
+</div>
