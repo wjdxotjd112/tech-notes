@@ -176,7 +176,7 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .article-body li + li { margin-top: 6px; }
 .article-body img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
 .article-body strong { font-weight: 700; color: var(--navy); }
-.article-body .architecture-diagram { display: block; width: 100%; max-width: 280px; margin: 10px auto; }
+.article-body .architecture-diagram { display: block; width: 100%; max-width: 320px; margin: 10px auto; }
 .article-body .environment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 16px 0; }
 .article-body .environment-grid > div > p:first-child { text-align: center; }
 .article-body .environment-section p,
@@ -361,6 +361,31 @@ h3 { color: var(--navy); line-height: 1.45; letter-spacing: -0.02em; font-weight
 .article-body .admonition.abstract > .admonition-title { font-size: 19px; }
 .article-body .admonition.abstract li { font-size: 16px; line-height: 1.75; }
 .article-body .admonition.abstract li + li { margin-top: 8px; }
+.article-body .incident-summary {
+  margin: 0 0 28px;
+  border: 1px solid #d8e2ee;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.article-body .incident-summary-header { padding: 20px 24px; background: #0b1f3a; }
+.article-body .incident-summary-label { display: block; color: #c1d5f5; font-size: 13px; font-weight: 650; letter-spacing: 0.06em; }
+.article-body .incident-summary-header p { margin: 6px 0 0; color: #fff; font-size: 21px; font-weight: 700; line-height: 1.45; }
+.article-body .incident-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.article-body .summary-card { padding: 20px 24px; border-top: 1px solid #e2e8f0; }
+.article-body .summary-card:nth-child(even) { border-left: 1px solid #e2e8f0; }
+.article-body .summary-card-label { display: inline-block; font-size: 13px; font-weight: 750; color: #2563eb; margin-bottom: 7px; }
+.article-body .summary-card p { margin: 0; font-size: 16px; line-height: 1.7; }
+.article-body .admonition.danger { background: #fff1f2; border: 1px solid #fecdd3; border-left: 4px solid #dc2626; border-radius: 6px; padding: 18px 22px; }
+.article-body .admonition.danger > .admonition-title { color: #991b1b !important; font-size: 17px; font-weight: 750; }
+.article-body .admonition.danger strong { color: #991b1b; }
+@media (max-width: 700px) {
+  .article-body .incident-summary-header { padding: 18px 20px; }
+  .article-body .incident-summary-header p { font-size: 19px; }
+  .article-body .incident-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .article-body .summary-card { padding: 16px 20px; }
+  .article-body .summary-card:nth-child(even) { border-left: 0; }
+}
 .article-body .flow {
   display: block;
   width: 100%;

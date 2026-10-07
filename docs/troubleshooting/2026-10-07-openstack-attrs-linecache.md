@@ -15,11 +15,30 @@ figure_lines:
     em: true
 ---
 
-!!! abstract "문제와 해결을 한눈에"
-    - **대시보드 조회가 느려진 상황.** 특정 Controller에서 인증 토큰 발급에 2초 이상, 하이퍼바이저 목록 조회에 6~7초 소요.
-    - **요청 검사에 쓰이는 보조 Python 코드가 메모리에 중복 보관되는 문제.** 같은 코드인데도 매번 새 항목으로 저장되고, 다음 저장 위치를 찾는 작업도 점점 증가.
-    - **기존 라이브러리에 필요한 수정만 반영.** 같은 코드는 이미 보관한 항목을 재사용하도록 attrs 코드를 수정.
-    - **반복 시험으로 중복 보관이 멈추는지 확인.** 원본은 시험할 때마다 저장 항목이 늘었지만, 수정본은 처음 만든 항목만 유지. 주요 API의 정상 응답도 확인.
+<section class="incident-summary" aria-labelledby="incident-summary-title">
+  <div class="incident-summary-header">
+    <span class="incident-summary-label">핵심 요약</span>
+    <p id="incident-summary-title">OpenStack API 지연의 원인과 해결</p>
+  </div>
+  <div class="incident-summary-grid">
+    <div class="summary-card">
+      <span class="summary-card-label">증상</span>
+      <p>특정 Controller에서 토큰 발급 <strong>2초 이상</strong>, 하이퍼바이저 목록 조회 <strong>6~7초</strong> 소요.</p>
+    </div>
+    <div class="summary-card">
+      <span class="summary-card-label">원인</span>
+      <p>요청 검사에 쓰이는 <strong>같은 보조 코드가 다른 이름으로 반복 저장</strong>. 메모리와 저장 위치 탐색 비용 증가.</p>
+    </div>
+    <div class="summary-card">
+      <span class="summary-card-label">해결</span>
+      <p>attrs 수정사항을 기존 버전에 반영해 <strong>동일 소스의 캐시 항목을 재사용</strong>하도록 변경.</p>
+    </div>
+    <div class="summary-card">
+      <span class="summary-card-label">검증</span>
+      <p>반복 시험에서 <strong>중복 보관 중단 확인</strong>. 토큰 발급·Nova·Cinder API 정상 응답 확인.</p>
+    </div>
+  </div>
+</section>
 
 ---
 
@@ -99,6 +118,10 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 
 </div>
 
+!!! danger "결론 — attrs의 동일 소스 중복 저장이 API 지연의 원인"
+    **같은 보조 소스를 다른 파일명으로 계속 저장**하면서 worker 메모리와 이름 탐색 비용 증가. 문제 노드의 높은 CPU·메모리와 지연을 설명하는 병목으로 판단.
+    코드 추적에서 해당 경로의 반복 실행을 확인했고, 수정 전후 시험으로 중복 저장 방지 동작 검증.
+
 <details class="analysis-toggle" markdown="1">
 <summary>3-1. API 버전 때문에 추가 작업이 생긴 것은 아닐까?</summary>
 
@@ -173,9 +196,6 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 
 </details>
 
-!!! tip "원인 후보를 좁힌 핵심 근거"
-    높은 CPU만으로 attrs 결함을 확정한 것은 아님. **실행 위치가 attrs의 이름 생성 경로에 집중**되고, **생성 소스 번호와 메모리 사용량도 크게 증가**한 점을 함께 확인. 이후 실제 소스 분석과 수정 전후 시험으로 중복 보관 동작 검증.
-
 ??? note "사용한 진단 명령 — 목적·옵션·결과 읽기"
     !!! warning "실행 전 확인"
         대상은 분석할 Controller. `P` 또는 `HOT_PID`에는 현재 확인한 worker PID 지정. strace와 perf는 처리 성능에 영향을 줄 수 있어 짧게 수집. 통신 로그에는 인증 정보가 포함될 수 있으므로 외부 공유 전 점검 필요.
@@ -244,11 +264,8 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 
     perf의 라이브러리 분석은 실행 위치를 좁히는 과정, Python USDT는 함수 호출 경로 확인용. 함수 진입 이벤트 수가 CPU 사용시간은 아니며 임시 probe는 수집 후 제거.
 
----
 
-## 4. 동일 소스가 누적되는 원리
-
-<p class="subsection-title"><strong>4-1. 토큰 발급 요청에도 입력값 검사가 필요</strong></p>
+<p class="subsection-title"><strong>3-6. 토큰 발급 요청에도 입력값 검사가 필요</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -271,7 +288,7 @@ token = authentication.authenticate_for_token(auth_data)
 
 </div>
 
-<p class="subsection-title"><strong>4-2. 검사 도구를 준비하면서 보조 코드 생성</strong></p>
+<p class="subsection-title"><strong>3-7. 검사 도구를 준비하면서 보조 코드 생성</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -291,7 +308,7 @@ token = authentication.authenticate_for_token(auth_data)
 
 </div>
 
-<p class="subsection-title"><strong>4-3. 왜 생성한 코드를 메모리에 보관할까?</strong></p>
+<p class="subsection-title"><strong>3-8. 왜 생성한 코드를 메모리에 보관할까?</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -301,7 +318,7 @@ token = authentication.authenticate_for_token(auth_data)
 
 </div>
 
-<p class="subsection-title"><strong>4-4. 문제는 보관 자체가 아니라 동일 소스의 중복 등록</strong></p>
+<p class="subsection-title"><strong>3-9. 문제는 보관 자체가 아니라 동일 소스의 중복 등록</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -334,7 +351,9 @@ token = authentication.authenticate_for_token(auth_data)
 
 ---
 
-## 5. 코드 수정
+## 4. 해결 방안
+
+<p class="subsection-title"><strong>4-1. 동일 소스를 재사용하도록 코드 수정</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -370,11 +389,8 @@ GitHub 변경 커밋은 `_make.py` 한 파일만 수정. 좌우 비교를 선택
 
 </div>
 
----
 
-## 6. 수정 전후 검증
-
-<p class="subsection-title"><strong>6-1. 왜 API를 수십만 번 호출하지 않았는지</strong></p>
+<p class="subsection-title"><strong>4-2. 캐시 누적 여부를 분리해서 검증</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -386,7 +402,7 @@ HTTP 요청 전체에는 인증, DB, 네트워크, worker 분배 등 여러 요�
 
 </div>
 
-<p class="subsection-title"><strong>6-2. 숫자 2개와 20개가 의미하는 것</strong></p>
+<p class="subsection-title"><strong>4-3. 수정 전후 결과</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -471,7 +487,7 @@ API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 �
 
 ---
 
-## 7. 운영 반영과 재발 방지
+## 5. 운영 반영과 재발 방지
 
 <div class="section-body" markdown="1">
 
@@ -490,7 +506,7 @@ API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 �
 
 ---
 
-## 8. 관련 사례와 참고 자료
+## 6. 관련 사례와 참고 자료
 
 <div class="section-body" markdown="1">
 
