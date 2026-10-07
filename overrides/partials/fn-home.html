@@ -10,35 +10,25 @@
 <main class="wrap">
   <section class="hero">
     <div>
-      <div class="eyebrow">FIELD NOTES / PERSONAL ENGINEERING JOURNAL</div>
+      <div class="eyebrow">FIELD NOTES</div>
       <h1>운영의 흔적을,
 기술의 기록으로.</h1>
-      <p>문제를 만났을 때 무엇을 의심했고, 어떻게 확인했는지.<br>구축과 운영 사이에서 배운 것들을 남기는 공간.</p>
+      <p>문제 발생 시 의심한 지점과 확인 방법.<br>구축과 운영에서 확인한 내용.</p>
     </div>
     <aside class="author-note">
       <div class="initial">fn.</div>
       <strong>Infrastructure Engineer</strong>
-      <p>클라우드 · Linux · 자동화<br>실험하고 기록하는 일.</p>
+      <p>클라우드 · Linux · 자동화<br>실험과 기록</p>
     </aside>
   </section>
   {% if featured.post %}
-  <section class="editor-feature">
-    <div class="feature-copy">
-      <span class="pill">FEATURED / {{ featured.post.category }}</span>
-      <h2>{{ featured.post.title }}</h2>
+  <a class="band" href="{{ featured.post.url | url }}">
+    <b>{{ featured.post.date }}<br>{{ featured.post.category }}</b>
+    <span>
+      <strong>{{ featured.post.title }}</strong>
       <p>{{ featured.post.summary }}</p>
-      <a class="readlink" href="{{ featured.post.url | url }}">이야기 읽기 ↗</a>
-    </div>
-    {% if featured.post.figure_lines %}
-    <div class="code-visual" aria-label="대표 글 메모">
-      <div class="window-label">{{ featured.post.figure_label }}</div>
-      <code>{% for line in featured.post.figure_lines %}{% if line is mapping %}{% if not loop.first %}
-{% endif %}{% if line.em %}<em>{{ line.text }}</em>{% else %}{{ line.text }}{% endif %}{% else %}{% if not loop.first %}
-{% endif %}{{ line }}{% endif %}{% endfor %}</code>
-      <p>샘플로 적어 둔 조사 순서</p>
-    </div>
-    {% endif %}
-  </section>
+    </span>
+  </a>
   {% endif %}
   <div class="journal-body">
     <section id="browse">
@@ -81,7 +71,7 @@
         </a>
         {% endfor %}
       </div>
-      <p class="empty" id="empty" hidden>조건에 맞는 글이 없다. 다른 검색어를 입력하거나 필터를 초기화해 보자.</p>
+      <p class="empty" id="empty" hidden>조건에 맞는 글 없음. 다른 검색어 또는 필터 초기화.</p>
     </section>
     <aside class="journal-side">
       <h3>주제별로 읽기</h3>

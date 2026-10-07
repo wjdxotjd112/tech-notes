@@ -42,10 +42,11 @@ uv run mkdocs serve
 | 폴더 | `category` |
 | --- | --- |
 | `docs/troubleshooting/` | 트러블슈팅 |
-| `docs/labs/` | 구축·실습 |
-| `docs/design/` | 개념·설계 |
-| `docs/automation/` | 자동화·CI/CD |
-| `docs/cheatsheets/` | 치트시트 |
+| `docs/labs/`, `docs/design/` | 구축설계 |
+| `docs/automation/` | 자동화 CI/CD |
+| 성능 측정 글 | 성능 튜닝 |
+
+폴더는 파일 정리용. 화면 분류는 메타데이터 `category`, 글 주소는 파일 경로.
 
 ```yaml
 title: "글 제목"
@@ -58,7 +59,7 @@ sample: false
 ```
 
 - `date`는 `YYYY-MM-DD`다. 홈 목록은 이 값으로 최신 글이 위로 온다.
-- `category`는 위 표의 다섯 값 중 하나다.
+- `category`는 `트러블슈팅`, `구축설계`, `자동화 CI/CD`, `성능 튜닝` 중 하나다.
 - `tags`는 기술 주제다. 예: OpenStack, Linux, Network, Storage, Observability, CI/CD.
 - 홈 대표 글은 `featured: true`인 글이다. 한 글에만 둔다.
 - `sample: true`는 예시 글 표시다. 실제 기록에는 뺀다.
@@ -68,6 +69,18 @@ sample: false
 ```markdown
 ![설명](../assets/example.png)
 ```
+
+## 문체
+
+공개 글, 소개, 안내는 짧은 개조식·명사형.
+
+- 설명은 자연스러운 명사형, 작업 기록은 상황에 맞는 개조식
+- 모든 문장을 `~했음`으로 끝내지 않음
+- 조건, 이유, 부정, 주의는 빼지 않음
+- 계획이나 미확인을 완료처럼 쓰지 않음
+- 명령, 코드, 로그, 인용은 원문 유지
+
+예: `디자인 확인용 샘플`, `설정 변경 후 서비스 재시작`, `동일한 지연 발생 확인`, `해당 옵션 미사용`, `테스트 진행했으나 재현되지 않음`
 
 ## 사이트 문구
 

@@ -6,10 +6,9 @@ from mkdocs.utils import meta
 
 CATEGORY_ORDER = [
     "트러블슈팅",
-    "구축·실습",
-    "개념·설계",
-    "자동화·CI/CD",
-    "치트시트",
+    "구축설계",
+    "자동화 CI/CD",
+    "성능 튜닝",
 ]
 
 POSTS: list[dict] = []
@@ -62,7 +61,7 @@ def on_nav(nav, config, files):
 
 
 def on_env(env, config, files):
-    categories = [name for name in CATEGORY_ORDER if any(post["category"] == name for post in POSTS)]
+    categories = list(CATEGORY_ORDER)
     tags: list[str] = []
     for post in POSTS:
         for tag in post["tags"]:
