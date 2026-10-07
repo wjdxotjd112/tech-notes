@@ -85,9 +85,9 @@ figure_lines:
 
 <div class="section-body" markdown="1">
 
-사내 대시보드에는 **`/os-hypervisors/detail`을 주기적으로 호출하는 로직** 존재. 해당 조회가 느려져 분석 시작, `nova-api.log`에서도 약 10초의 처리시간 확인.
+사내 대시보드는 **`/os-hypervisors/detail`을 주기적으로 호출**한다. 이 조회가 느려져 분석을 시작했고, `nova-api.log`에서도 약 10초의 처리시간을 확인했다.
 
-Controller별로 호출해 보니 **문제 노드에서만 토큰 발급과 목록 조회가 느린 상황**.
+Controller별로 호출해 보니 **문제 노드에서만 토큰 발급과 목록 조회가 느렸다.**
 
 | 관찰 항목 | 정상 노드 A/B | 문제 노드 C |
 | --- | --- | --- |
@@ -97,9 +97,9 @@ Controller별로 호출해 보니 **문제 노드에서만 토큰 발급과 목�
 | 일부 API worker CPU | 대체로 낮음 | **약 100~200%** |
 | worker RSS | 약 200,000 KiB | **약 1,700,000 KiB** |
 
-RSS는 프로세스가 실제 물리 메모리에 보유한 메모리 크기. 문제 노드의 worker에서는 정상 노드보다 훨씬 큰 메모리 사용량 확인.
+RSS는 프로세스가 실제 물리 메모리에 보유한 메모리 크기다. 문제 노드의 worker는 정상 노드보다 훨씬 많은 메모리를 사용하고 있었다.
 
-API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. CLI에는 인증과 클라이언트 처리도 포함될 수 있으므로 시간 차이를 그대로 한 구간의 비용으로 계산하지 않음.
+API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출에서 나온 값이다. CLI에는 인증과 클라이언트 처리도 포함될 수 있어, 두 값의 차이를 한 구간의 비용으로 계산할 수는 없다.
 
 </div>
 
@@ -111,18 +111,16 @@ API 로그의 약 10초와 CLI의 6~7초는 서로 다른 호출의 관측값. C
 
 <div class="section-body" markdown="1">
 
-API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서로 확인.
-
-</div>
+API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서로 범위를 좁혔다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>3-1-1. API 버전 때문에 추가 작업이 생긴 것은 아닐까?</summary>
 
 **의심한 이유:** Nova는 API 버전에 따라 처리 내용이 달라질 수 있어, 특정 버전의 추가 작업이 지연을 만드는지 확인 필요.
 
-**확인:** `2.87`과 `2.88` 비교. 테스트에서는 차이가 있었지만 운영 대시보드는 `2.87`을 사용했고, 운영 비교에서는 뚜렷한 차이를 찾지 못함.
+**확인:** `2.87`과 `2.88`을 비교했다. 테스트에서는 차이가 있었지만 운영 대시보드는 `2.87`을 사용했고, 운영 비교에서는 뚜렷한 차이를 찾지 못했다.
 
-**판단:** 2.88의 uptime 관련 추가 처리만으로 설명하기 어려워, 공통 인증·API 처리 경로로 조사 범위 이동.
+**판단:** 2.88의 uptime 관련 추가 처리만으로는 설명하기 어려웠다. 공통 인증·API 처리 경로로 조사 범위 이동.
 
 
 </details>
@@ -132,11 +130,11 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 
 **의심한 이유:** API 앞단의 HAProxy에서 요청을 중계·분배하는 시간이 길어질 가능성.
 
-**확인:** HAProxy를 거치지 않고 문제 노드의 Keystone `:5000`으로 직접 호출. 직접 호출에서도 토큰 발급에 약 2초 이상 소요.
+**확인:** HAProxy를 거치지 않고 문제 노드의 Keystone `:5000`으로 직접 호출했다. 이때도 토큰 발급에 약 2초 이상 소요.
 
 **판단:** 로드밸런서만의 문제보다 문제 노드 내부의 처리 경로를 확인할 필요.
 
-`GET /v3`는 API 버전·서비스 정보 확인에 쓰이는 가벼운 요청. 토큰 발급 POST는 인증 데이터를 받아 검사와 인증을 수행하므로, GET이 빠르다는 사실만으로 토큰 발급 경로까지 정상이라고 판단할 수 없음.
+`GET /v3`는 API 버전·서비스 정보를 확인하는 가벼운 요청이다. 토큰 발급 POST는 인증 데이터를 받아 검사와 인증을 수행한다. GET이 빠르다는 사실만으로 토큰 발급 경로까지 정상이라고 볼 수는 없다.
 
 
 </details>
@@ -146,9 +144,9 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 
 **의심한 이유:** 문제 노드에 요청이 몰리면 worker가 바빠지고 뒤의 요청도 지연될 가능성.
 
-**확인:** tcpdump로 Keystone 통신 비교. 노드 간 통신 규모는 대체로 유사했고, 설정·패키지·Fernet key도 유사. Fernet key는 토큰 암호화에 사용하는 키. 높은 CPU·메모리는 문제 노드에서만 관찰.
+**확인:** tcpdump로 Keystone 통신을 비교했다. 노드 간 통신 규모는 대체로 유사했고, 설정·패키지·Fernet key도 비슷했다. Fernet key는 토큰 암호화에 쓰이는 키다. 높은 CPU·메모리는 문제 노드에서만 관찰.
 
-**판단:** 현재 요청량 차이만으로 설명하기 어려워 worker 내부 상태에 집중.
+**판단:** 현재 요청량 차이만으로 설명하기 어려워 worker 내부 상태에 집중했다.
 
 - 6개 worker PID는 유지, CPU가 높은 worker만 교대. 특정 PID 하나가 아니라 6개 전체를 관찰한 이유.
 - POST는 계속 유입되는 상태. 요청량이 적었던 것이며 완전한 무요청 상태는 아님.
@@ -161,9 +159,9 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 
 **의심한 이유:** 토큰 발급에는 사용자·권한 조회가 있어 DB나 캐시 연결 대기도 후보. 같은 DB를 사용하더라도 노드별 통신 경로는 다를 수 있음. LDAP은 미사용.
 
-**확인:** strace로 통신·대기 작업과 소요시간 확인. 관찰 범위에서 긴 DB·Memcached·socket 응답 대기는 찾지 못했고, CPU는 주로 `%usr`에서 증가.
+**확인:** strace로 통신·대기 작업과 소요시간을 살폈다. 관찰 범위에서 긴 DB·Memcached·socket 응답 대기는 찾지 못했고, CPU는 주로 `%usr`에서 증가했다.
 
-**판단:** `%usr`는 프로그램 코드 실행에 사용한 CPU 비율. 외부 응답 대기보다 Python 안의 연산을 추적할 필요. 단, 이번 수집만으로 모든 I/O 문제를 배제한 것은 아님.
+**판단:** `%usr`는 프로그램 코드 실행에 사용한 CPU 비율이다. 외부 응답 대기보다 Python 안의 연산을 추적할 필요가 있었다. 이번 수집만으로 모든 I/O 문제를 배제한 것은 아니다.
 
 
 </details>
@@ -171,11 +169,11 @@ API 버전 → HAProxy → 요청량 → 통신 대기 → Python 실행 순서�
 <details class="analysis-toggle" markdown="1">
 <summary>3-1-5. Python 안에서는 어떤 작업이 반복될까?</summary>
 
-**의심한 이유:** 높은 `%usr`와 짧은 통신 대기는 Python 내부의 반복 연산을 의심할 근거. strace로는 문자열 생성·캐시 검색 같은 프로그램 내부 연산 확인이 어려움.
+**의심한 이유:** 높은 `%usr`와 짧은 통신 대기를 보고 Python 내부의 반복 연산을 의심했다. strace로는 문자열 생성·캐시 검색 같은 내부 연산을 확인하기 어렵다.
 
-**확인:** perf로 실행이 집중된 라이브러리 비교. 정상 노드는 비밀번호 해시 계산과 관련된 `_bcrypt.abi3.so`, **문제 노드는 Python 실행을 담당하는 libpython**이 두드러짐. 별도 bcrypt 시험에서 노드 간 뚜렷한 차이는 찾지 못함.
+**확인:** perf로 실행이 집중된 라이브러리를 비교했다. 정상 노드는 비밀번호 해시 계산과 관련된 `_bcrypt.abi3.so`, **문제 노드는 Python 실행을 담당하는 libpython**이 두드러졌다. 별도 bcrypt 시험에서는 노드 간 뚜렷한 차이를 찾지 못했다.
 
-Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다음 위치 확인:
+Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혔다. 확인한 위치는 다음과 같다.
 
 - `attr/_make.py`의 **`_generate_unique_filename()`** — 동적으로 만든 코드에 붙일 이름 생성.
 - `uuid.py`의 **`__str__()`** — 이름 예약에 쓰는 식별 값을 문자열로 변환.
@@ -184,43 +182,35 @@ Python 함수 호출을 추적하는 USDT 이벤트로 범위를 더 좁혀 다�
 - **생성 파일명 번호:** 정상 노드 약 2만, 문제 노드 약 69만. `Validator-N`의 N은 파일명에 붙은 번호이며 객체·캐시 개수를 직접 센 값은 아님.
 - **메모리:** `RssAnon`·`Anonymous`·`Private_Dirty`·`VmData` 증가. 프로세스의 사유·익명 메모리에 누적 관찰.
 
-**판단:** 큰 번호의 생성 소스, 이름 생성 함수의 반복 실행, 프로세스 메모리 증가가 함께 관찰돼 코드 생성·보관 경로로 범위 축소.
+**판단:** 큰 번호의 생성 소스, 이름 생성 함수의 반복 실행, 프로세스 메모리 증가가 함께 나타났다. 코드 생성·보관 경로로 조사 범위 축소.
 
 
 </details>
 
-<div class="section-body" markdown="1">
-
-관찰한 통신 대기와 요청량 차이만으로 지연을 설명하기 어려운 상황. **Python 실행 추적에서 이름 생성 함수의 반복 호출과 메모리 증가가 함께 관찰**돼, 생성 코드의 보관 경로로 조사 범위 축소.
+관찰한 통신 대기와 요청량 차이만으로는 지연을 설명하기 어려웠다. **Python 실행 추적에서 이름 생성 함수의 반복 호출과 메모리 증가가 함께 나타나**, 생성 코드의 보관 경로를 확인하기로 했다.
 
 </div>
 
-<p class="subsection-title"><strong>3-2. 확인한 원인 — 같은 검사 코드의 중복 등록</strong></p>
+<p class="subsection-title"><strong>3-2. 확인한 원인 — 같은 소스의 반복 등록</strong></p>
 
 <div class="section-body" markdown="1">
 
-토큰 요청의 입력값 검사에서 검사 도구 준비와 코드 생성으로 이어지는 경로. **생성한 소스를 재사용하지 않는 보관 방식**에서 비용 누적 발생.
+추적한 이름 생성 함수는 토큰 요청의 입력값 검사에 쓰이는 도구를 준비할 때 호출된다. 이 경로에서 attrs가 만든 소스를 어떻게 보관하는지 확인했다.
 
-</div>
+??? note "토큰 요청에서 검사 코드가 생성되는 과정"
+    `openstack token issue`는 Keystone의 `POST /v3/auth/tokens`에 인증 방식·사용자·프로젝트 정보를 JSON으로 전달한다. Keystone은 **입력 데이터의 구조를 검사한 뒤 사용자 인증과 토큰 발급을 진행한다.** 구조의 검사 규칙을 스키마(schema), 그 규칙에 따라 입력을 확인하는 도구를 Validator라고 부른다.
 
-<p class="subsection-title"><strong>3-2-1. 토큰 요청에서 검사 코드가 생성되는 경로</strong></p>
+    [Keystone Caracal의 토큰 발급 코드](https://github.com/openstack/keystone/blob/24.0.0/keystone/api/auth.py)에서 확인한 순서:
 
-<div class="section-body" markdown="1">
+    ```python title="keystone/api/auth.py — 토큰 발급 처리 일부" hl_lines="2"
+    auth_data = self.request_body_json.get('auth')
+    auth_schema.validate_issue_token_auth(auth_data)
+    token = authentication.authenticate_for_token(auth_data)
+    ```
 
-`openstack token issue`는 Keystone의 `POST /v3/auth/tokens`에 인증 방식·사용자·프로젝트 정보를 JSON으로 전달. Keystone은 **입력 데이터의 구조를 검사한 뒤 사용자 인증과 토큰 발급 진행**. 이 구조의 검사 규칙이 스키마(schema), 규칙에 따라 입력을 확인하는 도구가 Validator.
+    강조된 두 번째 줄이 스키마 검증의 진입점이다. `SchemaValidator` → jsonschema의 `extend()` → `create()`로 연결돼 새 Validator 클래스를 만든다. **`@attr.s`를 통해 attrs가 초기화·비교 등의 보조 코드를 생성한다.**
 
-[Keystone Caracal의 토큰 발급 코드](https://github.com/openstack/keystone/blob/24.0.0/keystone/api/auth.py)에서 확인한 순서:
-
-```python title="keystone/api/auth.py — 토큰 발급 처리 일부" hl_lines="2"
-auth_data = self.request_body_json.get('auth')
-auth_schema.validate_issue_token_auth(auth_data)
-token = authentication.authenticate_for_token(auth_data)
-```
-
-강조된 두 번째 줄이 스키마 검증의 진입점. `SchemaValidator` → jsonschema의 `extend()` → `create()`로 연결돼 새 Validator 클래스 생성. 이때 **`@attr.s`가 attrs에 초기화·비교 등의 보조 코드 생성을 맡기는 표시**.
-
-??? note "보충 — 검사 클래스와 생성되는 메서드"
-    클래스는 객체의 데이터와 기능을 정의한 설계도. 여기서는 검사 도구의 설계도를 요청 처리 중 새로 만드는 방식이라 동적 클래스 생성으로 표현.
+    클래스는 객체의 데이터와 기능을 정의한 설계도다. 여기서는 요청 처리 중 검사 도구의 클래스를 새로 만들기 때문에 동적 클래스 생성으로 표현했다.
 
     입력값 검사는 필요한 항목이 빠졌거나 자료형이 잘못된 요청을 걸러내는 단계. 검사 도구를 준비하려면 다음 기본 기능도 필요.
 
@@ -230,17 +220,11 @@ token = authentication.authenticate_for_token(auth_data)
     | `__eq__` | 객체 간 동등성 비교. attrs의 기본 생성 기능 |
     | `__hash__` | 해시 기능을 사용하는 클래스에서 생성. 이번 수정 범위에도 포함 |
 
-</div>
+attrs는 메서드 소스를 문자열로 만들고 실행 가능한 Python 코드로 변환한다. 실제 파일에서 읽은 코드가 아니므로, 오류 분석 때 소스를 다시 표시하려면 별도로 보관해야 한다.
 
-<p class="subsection-title"><strong>3-2-2. 같은 소스가 새 이름으로 계속 등록되는 문제</strong></p>
+보관 위치는 Python의 **linecache**. 가상 파일명을 붙여 각 worker의 메모리에 소스 문자열과 관련 정보를 저장한다. 디스크 파일이나 외부 Memcached와는 별개다.
 
-<div class="section-body" markdown="1">
-
-attrs는 메서드 소스를 문자열로 만들고 실행 가능한 Python 코드로 변환. 실제 파일에서 읽은 코드가 아니므로 오류 분석·디버깅 때 소스를 표시하려면 별도 보관 필요.
-
-보관 위치는 Python의 **linecache**. 가상 파일명을 붙여 **각 worker의 메모리에 소스 문자열과 관련 정보 저장**. 디스크 파일이나 외부 Memcached와는 별개.
-
-기존 구현은 이미 같은 소스가 있어도 재사용하지 않고 `Validator-2`, `Validator-3`처럼 다른 이름으로 반복 보관.
+기존 구현에서는 같은 소스가 이미 있어도 재사용하지 않았다. `Validator-2`, `Validator-3`처럼 새 이름을 붙여 다시 등록하는 방식이었다.
 
 <figure class="flow">
   <ol>
@@ -253,31 +237,23 @@ attrs는 메서드 소스를 문자열로 만들고 실행 가능한 Python 코�
   </ul>
 </figure>
 
-`_generate_unique_filename()`은 UUID라는 식별 값으로 이름을 예약하고, 이미 사용된 이름이면 `-2`·`-3` 등을 처음부터 탐색. **생성 소스가 같은지 비교해 기존 항목을 재사용하는 처리 부재.**
+`_generate_unique_filename()`은 UUID로 이름을 예약하고, 이미 사용된 이름이면 `-2`·`-3` 등을 처음부터 탐색한다. **생성 소스가 같은지 비교해 기존 항목을 재사용하는 처리는 없었다.**
 
-</div>
-
-<p class="subsection-title"><strong>3-2-3. 중복 등록이 CPU·메모리 증가로 이어지는 이유</strong></p>
-
-<div class="section-body" markdown="1">
-
-중복 등록이 반복되면서 두 가지 비용 증가:
+이 동작이 반복되면서 두 가지 비용이 쌓였다.
 
 - **메모리:** 같은 메서드 소스를 worker 메모리에 계속 보관.
 - **CPU:** 다음 코드를 등록할 때 이미 사용된 이름들을 처음부터 다시 탐색.
 
-이미 많은 항목을 보유한 worker라면 현재 요청량이 적어도 한 번의 준비 작업에 큰 비용 발생. **트래픽 규모는 비슷한데 문제 노드만 CPU·메모리 사용량이 크고 느렸던 관측**과 연결. 3-1의 Python 실행 추적에서도 이름 생성 함수의 반복 호출과 사유·익명 메모리 증가를 함께 확인.
+많은 항목이 쌓인 worker는 현재 요청량이 적어도 한 번의 준비 작업에 큰 비용이 들 수 있다. 트래픽 규모는 비슷한데 문제 노드만 CPU·메모리 사용량이 크고 느렸던 관측과 맞아떨어졌다. 3-1의 추적에서도 이름 생성 함수의 반복 호출과 사유·익명 메모리 증가를 함께 확인했다.
 
 !!! danger "결론 — 동일 소스의 중복 등록과 이름 탐색 비용 누적"
-    **같은 생성 소스를 재사용하지 않는 구현이 메모리 증가와 반복 이름 탐색 비용을 누적시키는 병목으로 판단.** Python 실행 추적으로 해당 경로의 반복 호출을 확인했고, 다음 절의 수정 전후 시험에서 중복 등록 방지 동작 검증.
+    **같은 생성 소스를 재사용하지 않는 구현을 병목으로 판단했다.** 소스의 중복 보관과 반복 이름 탐색이 메모리·CPU 비용을 함께 늘렸고, 다음 절의 수정 전후 시험에서 중복 등록 방지 동작을 확인했다.
 
-문제 노드에 더 많이 누적된 정확한 과거 호출·가동 이력은 별도 확인 대상.
+다만 문제 노드에 더 많이 누적된 정확한 과거 호출·가동 이력은 별도로 확인해야 한다.
 
-**해결 방향:** 코드 생성과 디버깅용 소스 보관은 유지하고, 같은 소스는 기존 항목 재사용. 다음 절에서 백포트와 검증 결과 확인.
+**해결 방향:** 코드 생성과 디버깅용 소스 보관은 유지하고, 같은 소스는 기존 항목을 재사용. 백포트 내용과 검증 결과는 다음 절에 정리했다.
 
 관련 소스: [Keystone 검증 연결](https://github.com/openstack/keystone/blob/24.0.0/keystone/auth/schema.py), [Keystone SchemaValidator](https://github.com/openstack/keystone/blob/24.0.0/keystone/common/validation/validators.py), [jsonschema 4.16.0 클래스 생성](https://github.com/python-jsonschema/jsonschema/blob/v4.16.0/jsonschema/validators.py), [attrs 20.3.0 이름 생성](https://github.com/python-attrs/attrs/blob/20.3.0/src/attr/_make.py#L1429-L1456).
-
-</div>
 
 ??? note "사용한 진단 명령 — 목적·옵션·결과 읽기"
     !!! warning "실행 전 확인"
@@ -347,6 +323,8 @@ attrs는 메서드 소스를 문자열로 만들고 실행 가능한 Python 코�
 
     perf의 라이브러리 분석은 실행 위치를 좁히는 과정, Python USDT는 함수 호출 경로 확인용. 함수 진입 이벤트 수가 CPU 사용시간은 아니며 임시 probe는 수집 후 제거.
 
+</div>
+
 ---
 
 ## 4. 해결 방안
@@ -355,9 +333,9 @@ attrs는 메서드 소스를 문자열로 만들고 실행 가능한 Python 코�
 
 <div class="section-body" markdown="1">
 
-이미 공개된 [attrs 수정 #828](https://github.com/python-attrs/attrs/commit/38580632ceac1cd6e477db71e1d190a4130beed4)을 기존 20.3.0 코드에 반영. **기존 버전을 유지하면서 필요한 수정만 가져오는 백포트** 방식.
+이미 공개된 [attrs 수정 #828](https://github.com/python-attrs/attrs/commit/38580632ceac1cd6e477db71e1d190a4130beed4)을 기존 20.3.0 코드에 반영했다. **기존 버전을 유지하면서 필요한 수정만 가져오는 백포트** 방식이다.
 
-수정 파일은 `/usr/lib/python3.9/site-packages/attr/_make.py`. 다른 최신 버전의 파일 전체를 그대로 교체한 것은 아님.
+수정 파일은 `/usr/lib/python3.9/site-packages/attr/_make.py`. 다른 최신 버전의 파일 전체를 그대로 교체하지는 않았다.
 
 <figure class="flow">
   <ol>
@@ -377,7 +355,7 @@ attrs는 메서드 소스를 문자열로 만들고 실행 가능한 Python 코�
 
 [원본 코드](https://github.com/wjdxotjd112/tech-notes/blob/4ebd34d/examples/attrs-linecache/attr/_make.py) · [수정 코드](https://github.com/wjdxotjd112/tech-notes/blob/93fe7d8ee88b13328e773f69ed50f991866f0542/examples/attrs-linecache/attr/_make.py) · [전체 diff 다운로드](../assets/openstack-attrs-linecache/python-attrs-20.3.0-7.el9-linecache-backport.patch)
 
-GitHub 변경 커밋은 `_make.py` 한 파일만 수정. 좌우 비교를 선택하면 제거한 코드와 추가한 코드 확인 가능.
+GitHub 변경 커밋에서는 `_make.py` 한 파일만 수정했다. 좌우 비교를 선택하면 제거한 코드와 추가한 코드를 함께 볼 수 있다.
 
 | 수정 위치 | 변경 목적 |
 | --- | --- |
@@ -392,11 +370,11 @@ GitHub 변경 커밋은 `_make.py` 한 파일만 수정. 좌우 비교를 선택
 
 <div class="section-body" markdown="1">
 
-HTTP 요청 전체에는 인증, DB, 네트워크, worker 분배 등 여러 요인 포함. 이번 수정이 겨냥한 부분은 **검사 도구 준비 시 같은 소스가 중복 보관되는지 여부**.
+HTTP 요청 전체에는 인증, DB, 네트워크, worker 분배 등 여러 요인이 포함된다. 이번 수정에서는 **검사 도구를 준비할 때 같은 소스가 중복 보관되는지**를 확인했다.
 
-별도 Rocky Linux 9.6 테스트 노드에서 Keystone이 사용하는 `SchemaValidator`의 생성 경로만 분리해 10회 반복. 원본과 수정본이 같은 일을 수행할 때 코드 보관 항목이 계속 늘어나는지 비교.
+별도 Rocky Linux 9.6 테스트 노드에서 Keystone의 `SchemaValidator` 생성 경로만 분리해 10회 반복했다. 같은 작업을 수행할 때 원본과 수정본의 소스 보관 항목이 어떻게 늘어나는지 비교했다.
 
-10회는 **누적 방식이 바뀌었는지 확인하기 위한 횟수**, 운영 성능이나 장기 안정성을 모두 검증하기 위한 부하량은 아님.
+10회는 **누적 방식이 바뀌었는지 확인하기 위한 횟수**다. 운영 성능이나 장기 안정성을 모두 검증한 부하량은 아니다.
 
 </div>
 
@@ -404,7 +382,7 @@ HTTP 요청 전체에는 인증, DB, 네트워크, worker 분배 등 여러 요�
 
 <div class="section-body" markdown="1">
 
-이 시험에서는 검사 도구를 한 번 준비할 때 `__init__`와 `__eq__`의 소스가 한 항목씩 생성돼 최초 **2개** 등록.
+이 시험에서는 검사 도구를 한 번 준비할 때 `__init__`와 `__eq__`의 소스가 한 항목씩 생성됐다. 최초 등록 항목은 **2개**.
 
 | 같은 검사 도구를 준비한 횟수 | 원본의 관련 소스 보관 항목 | 수정본의 관련 소스 보관 항목 |
 | --- | --- | --- |
@@ -414,18 +392,18 @@ HTTP 요청 전체에는 인증, DB, 네트워크, worker 분배 등 여러 요�
 | 10회 | **20개** | **2개** |
 
 !!! tip "검증 결과 읽기"
-    **원본은 같은 소스를 계속 추가, 수정본은 최초 2개를 재사용.** 처음 준비할 때의 기능은 유지하면서, 같은 검사 도구를 다시 준비할 때 중복 항목이 늘지 않는지 확인한 결과.
+    **원본은 같은 소스를 계속 추가, 수정본은 최초 2개를 재사용.** 처음 준비할 때의 기능을 유지하면서도, 반복 준비 시 중복 항목이 늘지 않는지 확인한 결과다.
 
-각 조건은 별도의 Python 시험 프로세스에서 측정했고, 실제 설치한 수정본에서도 같은 결과 확인.
+각 조건은 별도의 Python 시험 프로세스에서 측정했다. 실제 설치한 수정본에서도 같은 결과를 확인했다.
 
-전체 linecache 크기나 운영 worker의 캐시를 직접 센 결과가 아니라, 이 시험의 Validator 관련 소스 항목 수.
+표의 수치는 이 시험의 Validator 관련 소스 항목 수다. 전체 linecache 크기나 운영 worker의 캐시를 직접 센 값은 아니다.
 
 추가 기능 확인도 진행:
 
 - 객체 초기화·비교·해시, 다른 생성 소스의 분리, 동시 생성, Keystone 스키마 검증 정상.
 - Keystone 토큰 발급·Nova 하이퍼바이저 조회·Cinder 서비스 조회 성공.
 
-API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 응답시간이나 전체 OpenStack 회귀 시험을 대신하는 결과는 아님.
+API의 정상 응답까지 확인했다. 다만 운영 환경의 패치 전후 응답시간이나 전체 OpenStack 회귀 시험을 대신하는 결과는 아니다.
 
 ??? note "수동 수정과 검증 명령"
     !!! warning "적용 대상과 복구 준비"
@@ -489,16 +467,16 @@ API 정상 응답 확인까지 진행했지만, 운영 환경의 패치 전후 �
 
 <div class="section-body" markdown="1">
 
-**worker 재기동만으로도 누적된 메모리가 초기화돼 일시적으로 빨라질 수 있음.** 하지만 원본 코드가 남아 있으면 같은 조건에서 다시 누적 가능. 재기동은 임시 완화, 백포트는 누적 방식 수정.
+**worker를 재기동하면 누적된 메모리가 초기화돼 일시적으로 빨라질 수 있다.** 원본 코드가 남아 있으면 같은 조건에서 다시 쌓일 수 있으므로 재기동은 임시 완화에 해당한다. 백포트는 누적 방식 자체를 수정하는 조치.
 
-수정 파일을 저장해도 이미 실행 중인 worker는 이전에 읽은 코드 사용. 새 코드를 반영하려면 관련 서비스의 계획된 재기동 필요.
+수정 파일을 저장해도 실행 중인 worker는 이전에 읽은 코드를 사용한다. 새 코드를 반영하려면 관련 서비스의 계획된 재기동이 필요하다.
 
 !!! warning "운영 반영 전"
     실제 서비스 구동 방식을 확인한 뒤 HAProxy에서 대상 노드의 요청을 빼고 순차 작업. 해당 환경의 대상은 Keystone을 구동하는 httpd와 Nova·Cinder API 등. 원본 복원·재기동 절차와 주요 API 확인 준비. 테스트에서도 종료 지연과 일시적 서비스 실패 이력이 있어 재기동 영향 점검 필요.
 
-수동 변경은 RPM 재설치·업데이트로 덮어써질 수 있어, 장기 운영에는 **수정 이력을 관리하는 백포트 RPM 또는 배포사 공식 패키지** 검토.
+수동 변경은 RPM 재설치·업데이트로 덮어써질 수 있다. 장기 운영에는 **수정 이력을 관리하는 백포트 RPM 또는 배포사 공식 패키지** 검토.
 
-운영 반영 후에는 같은 API의 응답시간과 worker CPU·RSS를 확인하고, 시간이 지나도 다시 증가하지 않는지 관찰. **재기동 직후가 아니라 반복 요청 이후의 상태까지 확인**하는 것이 재발 방지의 핵심.
+운영 반영 후에는 같은 API의 응답시간과 worker CPU·RSS를 확인하고, 시간이 지나도 다시 증가하지 않는지 관찰한다. **재기동 직후뿐 아니라 반복 요청 이후의 상태까지 확인**해야 한다.
 
 </div>
 
