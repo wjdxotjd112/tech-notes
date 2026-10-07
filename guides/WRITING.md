@@ -2,13 +2,17 @@
 
 게시 절차는 [배포](DEPLOYMENT.md). 로컬 명령은 [운영](OPERATIONS.md). 본문 골격은 [템플릿](../templates/post.md).
 
-## 시작 프롬프트
+## 자동 시작
 
-새 workspace에서 글을 맡길 때:
+AI-Setup의 `skillnotes-publish`를 설치한 환경에서는 다음처럼 요청. 매번 규칙 파일이나 게시 명령을 지정할 필요 없음.
 
 ```text
-이 저장소는 SkillNotes다. AGENTS.md와 guides/WRITING.md를 읽고, templates/의 해당 종류로 글을 작성한다. 로컬 검사와 mkdocs build --strict 통과 후 관련 파일만 커밋·푸시하고, 그 커밋의 Actions 배포와 게시 URL을 확인한다. 초안만·검토만이면 게시하지 않는다.
+이 내용을 블로그에 정리해줘.
 ```
+
+자료 확인 → 분류·제목·구성·공개 범위 제안 → 사용자 승인 → 작성·검증·게시 순서. 초안만·검토만이면 게시 제외.
+
+다른 workspace에서도 동작하도록 [AI-Setup 설치·검증](https://github.com/wjdxotjd112/AI-Setup/blob/main/docs/skillnotes.md)을 먼저 적용. 설치 전인 도구는 저장소의 `AGENTS.md`를 읽도록 지정. 설치 파일 확인과 새 세션의 실제 인식 확인은 별개.
 
 ## 문체
 
