@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 665" role="img" aria-labelledby="title desc">
+  <title id="title">HAProxy와 세 Controller의 API 구성</title>
+  <desc id="desc">대시보드와 CLI 요청을 HAProxy가 세 Controller로 분배. 각 노드의 Keystone은 여섯 worker로 요청 처리. Controller C에서만 지연 관찰. 선은 요청 전달 방향이며 직접 호출 시험은 HAProxy를 우회.</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L9 5L0 10Z" fill="#2563eb"/></marker></defs>
+  <rect x="1" y="1" width="558" height="663" rx="12" fill="#f8fafc" stroke="#dbe3ee"/>
+  <g font-family="Pretendard, Malgun Gothic, Apple SD Gothic Neo, sans-serif" text-anchor="middle" fill="#1e293b">
+    <g fill="#fff" stroke="#0b1f3a"><rect x="110" y="24" width="340" height="66" rx="8"/><rect x="110" y="133" width="340" height="70" rx="8"/><rect x="70" y="264" width="455" height="96" rx="8"/><rect x="70" y="389" width="455" height="96" rx="8"/></g>
+    <rect x="70" y="514" width="455" height="96" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+    <g font-size="23" font-weight="600"><text x="280" y="65">대시보드 / OpenStack CLI</text><text x="280" y="164">HAProxy</text><text x="298" y="299">정상 노드 A</text><text x="298" y="424">정상 노드 B</text><text x="298" y="549" fill="#9a3412">문제 노드 C — API 응답 지연</text></g>
+    <g font-size="21" fill="#3d4d63"><text x="280" y="190">요청 분배</text><text x="298" y="337">Keystone: 6 worker · Nova API</text><text x="298" y="462">Keystone: 6 worker · Nova API</text><text x="298" y="587">Keystone: 6 worker · Nova API</text></g>
+    <text x="280" y="640" font-size="19" fill="#3d4d63">노드별 Keystone worker 개수: 당시 관찰된 구성</text>
+  </g>
+  <g fill="none" stroke="#2563eb" stroke-width="2.5"><path d="M280 90V119" marker-end="url(#arrow)"/><path d="M280 203V231H35V562"/><path d="M35 312H57" marker-end="url(#arrow)"/><path d="M35 437H57" marker-end="url(#arrow)"/><path d="M35 562H57" marker-end="url(#arrow)"/></g>
+</svg>
