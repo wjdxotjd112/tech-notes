@@ -1,14 +1,13 @@
 ---
-title: "OpenTofu 입문 가이드 — 설치, 핵심 개념과 State 이해하기"
-summary: "인프라 설정 파일이 실제 리소스로 바뀌는 과정부터 init·plan·apply·destroy의 역할까지. VMware VM 생성에 앞서 익힐 OpenTofu 기본기."
+title: "OpenTofu 입문 가이드 - 1"
+summary: "1편: OpenTofu의 개념과 동작 원리, 설치, 핵심 용어와 State. init·plan·apply·destroy를 익히고 2편의 VMware 실습으로 이어진다."
 summary_style: editorial
 date: 2026-10-08
-category: 구축설계
+category: 개념
 tags:
   - 가이드
-  - OpenTofu
+  - Automation
   - Linux
-  - CI/CD
 ---
 
 <section class="editorial-summary editorial-summary--text-only" aria-labelledby="editorial-summary-title">
@@ -24,8 +23,8 @@ tags:
 
 이 가이드는 두 편으로 구성한다.
 
-1. **현재 글:** OpenTofu 설치와 동작 원리.
-2. [VMware VM 생성 가이드](2026-10-08-opentofu-vsphere-rocky.md): vCenter 준비, Rocky Linux 9.6 템플릿, VM 복제와 삭제.
+1. **OpenTofu 입문 가이드 - 1 (현재 글):** 개념·설치·핵심 용어와 State.
+2. [OpenTofu 입문 가이드 - 2](2026-10-08-opentofu-vsphere-rocky.md): vCenter와 Rocky Linux 9.6 템플릿으로 VM 생성·변경·삭제.
 
 ## 1. OpenTofu가 해결하는 일
 
@@ -275,4 +274,4 @@ crash.*.log
 - 같은 코드라도 입력값·State·Provider 버전이 달라지면 결과가 달라질 수 있다.
 - 삭제할 때도 생성 때 사용한 설정·인증·State가 필요하다.
 
-[다음: vCenter와 Rocky Linux 9.6 템플릿으로 VM 생성하기](2026-10-08-opentofu-vsphere-rocky.md)
+[다음: OpenTofu 입문 가이드 - 2 — VMware VM 생성 실습](2026-10-08-opentofu-vsphere-rocky.md)

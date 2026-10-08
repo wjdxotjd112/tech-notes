@@ -26,7 +26,7 @@ uv run mkdocs serve
 
 ## 문제
 
-- 글이 홈에 없음: front matter `category`가 네 값 중 하나인지 확인. `category`가 없으면 게시글이 아님.
+- 글이 홈에 없음: front matter `category`가 허용한 다섯 분류 중 하나인지 확인. `category`가 없으면 게시글이 아님.
 - 검사 실패: `scripts/check_posts.py` 메시지의 경로를 고친다. 비밀 값 자체는 메시지에 나오지 않음.
 - strict 빌드 실패: MkDocs가 보고한 링크·파일 경고를 고친다. 빌드 성공만으로 기술 내용을 맞다고 보지 않음.
 - 화면이 옛 내용: 브라우저 새로고침. Python 훅을 바꿨으면 미리보기 프로세스를 다시 실행.

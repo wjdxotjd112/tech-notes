@@ -9,6 +9,7 @@ CATEGORY_ORDER = [
     "구축설계",
     "자동화 CI/CD",
     "성능 튜닝",
+    "개념",
 ]
 
 POSTS: list[dict] = []

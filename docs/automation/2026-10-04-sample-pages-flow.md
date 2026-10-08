@@ -4,7 +4,7 @@ summary: 이 저장소 GitHub Actions의 빌드와 Pages 배포 분리 방식
 date: 2026-10-04
 category: 자동화 CI/CD
 tags:
-  - CI/CD
+  - Automation
 sample: true
 ---
 

@@ -5,7 +5,7 @@ date: 2026-10-03
 category: 구축설계
 tags:
   - Linux
-  - CI/CD
+  - Automation
 sample: true
 ---
 

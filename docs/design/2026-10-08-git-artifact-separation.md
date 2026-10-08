@@ -6,7 +6,7 @@ date: 2026-10-08
 category: 구축설계
 tags:
   - OpenStack
-  - CI/CD
+  - Automation
   - Linux
 ---
 

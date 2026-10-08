@@ -1,13 +1,12 @@
 ---
-title: "OpenTofu VMware 가이드 — vCenter와 Rocky Linux 9.6 템플릿으로 VM 생성하기"
-summary: "vCenter의 접속 주소·인벤토리·권한을 확인하고, Rocky 템플릿을 복제해 고정 IP를 가진 VM을 만드는 절차. 여러 VM 생성, 변경과 삭제까지."
+title: "OpenTofu 입문 가이드 - 2"
+summary: "2편: vCenter와 Rocky Linux 9.6 템플릿으로 VM 생성 실습. 접속 주소·인벤토리·권한 확인부터 여러 VM 생성·변경·삭제까지."
 summary_style: editorial
 date: 2026-10-08
-category: 구축설계
+category: 개념
 tags:
   - 가이드
-  - OpenTofu
-  - VMware
+  - Automation
   - Linux
 ---
 
@@ -22,7 +21,7 @@ tags:
   <p class="editorial-summary-result"><span><strong>환경 확인 → 템플릿 준비 → 코드 작성 → 생성·접속 → 추가·삭제</strong> 순서로 따라간다.</span></p>
 </section>
 
-[OpenTofu 입문 가이드](2026-10-08-opentofu-basics.md)를 먼저 읽으면 Provider·State·plan의 역할을 이해하기 쉽다. 이 글은 **vCenter가 관리하는 vSphere 환경, Rocky Linux 9.6 일반 VM 템플릿, 고정 IPv4**를 기준으로 한다. vSphere Client의 메뉴 이름은 버전·언어에 따라 조금 다르다.
+[OpenTofu 입문 가이드 - 1](2026-10-08-opentofu-basics.md)에서 익힌 개념을 VMware VM 생성 실습으로 연결한다. 이 글은 **vCenter가 관리하는 vSphere 환경, Rocky Linux 9.6 일반 VM 템플릿, 고정 IPv4**를 기준으로 한다. vSphere Client의 메뉴 이름은 버전·언어에 따라 조금 다르다.
 
 ## 1. 어떤 서버에 무엇을 요청하는가
 
@@ -662,7 +661,7 @@ tofu output -json vm_info > vm-info.json
 
 ## 11. 참고 자료
 
-- [OpenTofu 입문 가이드](2026-10-08-opentofu-basics.md)
+- [OpenTofu 입문 가이드 - 1](2026-10-08-opentofu-basics.md)
 - [VMware vSphere Provider 2.17.1](https://github.com/vmware/terraform-provider-vsphere/tree/v2.17.1)
 - [Provider 인증·권한·지원 환경](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md)
 - [VM 템플릿 조회](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md)

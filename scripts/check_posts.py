@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-CATEGORIES = ("트러블슈팅", "구축설계", "자동화 CI/CD", "성능 튜닝")
+CATEGORIES = ("트러블슈팅", "구축설계", "자동화 CI/CD", "성능 튜닝", "개념")
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 GUIDE_FILES = [
@@ -235,7 +235,7 @@ def check_posts(docs: Path) -> list[str]:
                 errors.append(f"{rel}: filename date and date differ")
         category = data.get("category")
         if category not in CATEGORIES:
-            errors.append(f"{rel}: category is not one of the four names")
+            errors.append(f"{rel}: category is not one of the supported names")
         tags = data.get("tags")
         if isinstance(tags, str):
             tags_ok = bool(tags.strip())

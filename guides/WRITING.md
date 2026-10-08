@@ -56,7 +56,7 @@ AI가 쓴 듯한 인상을 줄이기 위해 종결어를 금지하거나 문장�
 | `summary` | 예 | 문자열 | 목록·글 상단 요약 |
 | `summary_style` | 새 글에 예 | `editorial` | 편집형 본문 요약 스타일. 기존 글은 미지정 허용 |
 | `date` | 예 | `YYYY-MM-DD` | 기록 기준일. 한국 날짜. 시간 없음. 홈은 이 값으로 최신이 위 |
-| `category` | 예 | 아래 네 값 중 하나 | 화면 분류 |
+| `category` | 예 | 아래 다섯 값 중 하나 | 화면 분류 |
 | `tags` | 예 | 문자열 목록 | 기술 주제. 기존 표기 재사용 |
 | `featured` | 아니오 | `true` / `false` | 대표 글. 한 글만. 기존 값을 임의로 바꾸지 않음 |
 | `sample` | 아니오 | `true` / `false` | 예시 표시. 게시 제외 아님 |
@@ -75,9 +75,9 @@ tags:
   - Linux
 ```
 
-`category`: `트러블슈팅`, `구축설계`, `자동화 CI/CD`, `성능 튜닝`.
+`category`: `트러블슈팅`, `구축설계`, `자동화 CI/CD`, `성능 튜닝`, `개념`.
 
-이미 쓰는 태그: `Linux`, `Observability`, `Network`, `OpenStack`, `CI/CD`. 같은 뜻의 새 표기를 만들지 않는다.
+이미 쓰는 태그: `Linux`, `Observability`, `Network`, `OpenStack`, `Automation`, `가이드`. OpenTofu·VMware 자동화와 CI/CD 주제는 `Automation`으로 묶는다. 같은 뜻의 새 표기를 만들지 않는다.
 
 ## 경로
 
@@ -89,6 +89,7 @@ tags:
 | `docs/design/`, `docs/labs/`, `docs/cheatsheets/` | 구축설계 |
 | `docs/automation/` | 자동화 CI/CD |
 | `docs/performance/` | 성능 튜닝 |
+| `docs/concepts/` | 개념 |
 
 폴더는 파일 정리용. 화면 분류는 `category`. 주소는 파일 경로. 사이트는 `/tech-notes/` 아래다.
 
@@ -110,6 +111,7 @@ tags:
 | 구축설계 | 왜 해당 구성을 선택했고 어떻게 구축·동작 확인했는지 |
 | 자동화 CI/CD | 무엇을 입력받아 어떤 결과를 만들며 실패·재실행을 어떻게 처리하는지 |
 | 성능 튜닝 | 무엇을 변경했고 같은 조건의 측정에서 어떤 차이가 있었는지 |
+| 개념 | 기술의 역할·동작 원리·핵심 용어와 학습 예제가 어떻게 이어지는지 |
 
 짧은 실험이나 개념 설명에는 필요한 내용만 작성. 항목을 맞추기 위한 빈 절·미실행 결과·반복 설명 추가 금지.
 
