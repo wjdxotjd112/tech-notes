@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="670" viewBox="0 0 640 670" role="img" aria-labelledby="title desc">
+  <title id="title">OpenTofu와 vCenter의 VM 복제 흐름</title>
+  <desc id="desc">관리 서버의 OpenTofu와 Provider가 HTTPS로 vCenter에 요청한다. vCenter는 ESXi와 저장소 및 네트워크를 이용해 VM을 복제한다. VMware Tools는 Rocky 게스트의 초기 설정을 적용하고 IP를 보고한다.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker></defs>
+  <rect x="5" y="5" width="630" height="660" rx="12" fill="#eff5ff"/>
+  <g font-family="Pretendard, Noto Sans CJK KR, sans-serif" text-anchor="middle" fill="#1e293b">
+    <rect x="90" y="30" width="460" height="92" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="320" y="65" font-size="23" font-weight="600">OpenTofu 실행 서버</text><text x="320" y="97" font-size="19">설정·State · vSphere Provider</text>
+    <path d="M320 122V194" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><text x="430" y="163" font-size="18">HTTPS 443 / API 요청</text>
+    <rect x="90" y="200" width="460" height="92" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="320" y="235" font-size="23" font-weight="600">vCenter</text><text x="320" y="267" font-size="19">인벤토리 조회 · Clone · Customize</text>
+    <path d="M320 292V364" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><text x="426" y="333" font-size="18">복제·배치·전원 작업</text>
+    <rect x="90" y="370" width="460" height="92" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="320" y="405" font-size="23" font-weight="600">ESXi에서 VM 실행</text><text x="320" y="437" font-size="19">Datastore 디스크 · Port group NIC</text>
+    <path d="M320 462V534" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><text x="427" y="503" font-size="18">게스트 초기 설정</text>
+    <rect x="90" y="540" width="460" height="92" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="320" y="575" font-size="23" font-weight="600">Rocky Linux + VMware Tools</text><text x="320" y="607" font-size="19">호스트명·IP 적용 · 게스트 정보 보고</text>
+  </g>
+</svg>
