@@ -129,12 +129,12 @@ vCenter API 계정과 Rocky SSH 계정을 구분한다.
 | 목적지 Cluster 또는 Resource Pool | VM에 CPU·메모리 자원을 배정 | Cluster의 기본 pool을 쓰면 켬 |
 | 목적지 Datastore | 복제한 디스크를 저장 | 대상 datastore에 직접 연결, 끔 |
 | 목적지 Port group | 가상 NIC를 네트워크에 연결 | 대상 네트워크에 직접 연결, 끔 |
-| vCenter 최상위 객체 | 스토리지 정책 조회 | 조회 전용 Role로 연결, 아래 공식 절차에 따라 켬 |
+| vCenter 최상위 객체 | 스토리지 정책 조회 | 통합 Role의 VM 권한이 확산되지 않도록 끔 |
 
 연결 대상은 위의 **다섯 종류**다. 템플릿과 목적지 폴더가 분리돼 있으면 첫 번째 종류에서 두 곳에 연결한다. 이 글의 코드는 Cluster의 기본 Resource Pool을 사용하므로 **ESXi Host에 추가 관리 권한을 주는 절차는 넣지 않는다.**
 
 !!! warning "Role을 넓게 전파하지 않는다"
-    VM 생성·삭제 Role을 vCenter 최상위나 운영 Cluster에 연결하고 전파하면 의도하지 않은 VM까지 관리할 수 있다. VM 관리 범위는 실습 폴더로 한정하고, Cluster와 vCenter 최상위에는 필요한 작업만 담은 작은 Role을 연결한다. 폴더·datastore·네트워크마다 별도 Role을 만들 필요는 없다.
+    아래 구성은 필요한 권한을 Role 하나에 모은다. 이를 vCenter 최상위나 운영 Cluster에 연결하고 전파하면 VM 생성·삭제 권한도 하위 객체에 적용될 수 있다. vCenter 최상위의 전파는 끄고, Cluster 전파는 해당 실습 범위에 VM 관리 권한까지 허용해도 되는지 확인한다. 공유 운영 Cluster에서 배치 권한만 허용하려면 Role 분리가 필요하다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>3-1. 전용 API 사용자 만들기 — 관리 → Single Sign-On → 사용자 및 그룹</summary>
@@ -156,7 +156,7 @@ vSphere Client에 사용자·Role·권한을 관리할 수 있는 관리자 계�
 
 **메뉴 → 관리(Administration) → 액세스 제어(Access Control) → 역할(Roles) → 새로 만들기(NEW)**로 이동한다. 화면이 축약돼 있으면 각 범주의 **See more privileges**를 펼친다. 범주 전체를 체크하지 않고 아래 항목을 개별 선택한다.
 
-**① `OpenTofu-VM` — 실습 VM과 사용할 datastore·네트워크용**
+Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스토리지 정책 조회 권한을 **이 Role 하나에 함께 넣는다**. 이미 만든 Role이 있다면 새로 만들지 않고 같은 화면에서 해당 Role을 편집한다.
 
 | 권한 범주 | 체크할 항목 | 필요한 이유 |
 | --- | --- | --- |
@@ -169,35 +169,21 @@ vSphere Client에 사용자·Role·권한을 관리할 수 있는 관리자 계�
 | Virtual machine → Change Configuration | Change Settings | VM의 일반 구성 변경 |
 | Virtual machine → Change Configuration | Modify device settings | 템플릿에서 이어받은 가상 장치의 설정 변경 |
 | Virtual machine → Change Configuration | Change Swapfile Placement | Provider가 기본 swap 배치 정책 설정 |
+| Virtual machine → Change Configuration | Extend virtual disk | 원본보다 큰 디스크를 지정할 때 필요. 뒤의 여러 VM 예제에서 사용 |
 | Virtual machine → Interaction | Power on | 복제·설정 후 VM 부팅 |
 | Virtual machine → Interaction | Power off | 전원 종료가 필요한 변경·삭제 |
+| Resource | Assign virtual machine to resource pool | 목적지 Resource Pool에 VM 배치. Host 설정 변경 권한은 아님 |
 | Datastore | Allocate space | VM 디스크를 저장할 공간 할당 |
 | Network | Assign network | VM의 NIC를 선택한 Port group에 연결 |
+| VM storage policies | View VM storage policies | Provider의 스토리지 정책 조회. 권한 ID는 `StorageProfile.View` |
+| Virtual machine → Change Configuration | Add new disk | 새 디스크를 추가할 때만 선택. 기존 OS 디스크만 복제하면 불필요 |
+| Virtual machine → Change Configuration | Add existing disk | 별도의 기존 VMDK를 연결할 때만 선택 |
+| Virtual machine → Change Configuration | Add or remove device | NIC·컨트롤러 등 장치를 추가·제거할 때만 선택 |
+| Virtual machine → Change Configuration | Advanced configuration | `extra_config`로 고급 구성 키를 변경할 때만 선택 |
 
 `Deploy template`과 `Clone template`은 다르다. 이 실습은 **템플릿 → 일반 VM**이므로 `Deploy template`을 사용한다. 새 템플릿을 만드는 권한은 선택하지 않는다. [vSphere API: CloneVM_Task의 권한 조건](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#clone)
 
-다음 항목은 구성에 맞춰 추가한다.
-
-| 조건 | 추가할 권한 | 이유 |
-| --- | --- | --- |
-| 디스크를 원본보다 크게 지정 | Virtual machine → Change Configuration → Extend virtual disk | 복제한 디스크 용량 확장 |
-| 새 디스크 추가 | 같은 범주 → Add new disk | 기존 OS 디스크를 그대로 쓰는 예제에는 별도 추가 불필요 |
-| 기존 디스크 연결 | 같은 범주 → Add existing disk | 별도의 기존 VMDK를 연결할 때 사용 |
-| NIC·컨트롤러 등 장치 추가·제거 | 같은 범주 → Add or remove device | 템플릿 장치 구성을 바꿀 때 사용 |
-| `extra_config` 사용 | 같은 범주 → Advanced configuration | 고급 구성 키를 변경할 때 사용 |
-
 뒤의 여러 VM 예제는 디스크 크기를 다르게 지정하므로 원본보다 큰 VM에는 `Extend virtual disk`가 필요하다. `nested_hv_enabled`와 `extra_config`는 서로 다른 설정이므로 같은 것으로 취급하지 않는다. [vSphere API: ReconfigVM_Task의 항목별 권한](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#reconfigure)
-
-**② `OpenTofu-Placement` — Cluster·Resource Pool용**
-
-- **Resource → Assign virtual machine to resource pool**만 선택한다.
-- 목적지 Resource Pool에 VM을 배치하기 위한 Role이다. Host 설정 변경 권한이 아니다.
-- VM 관리 Role을 운영 Cluster 전체에 전파하지 않기 위해 분리한다. [Broadcom: Cluster·Resource Pool 할당 권한](https://knowledge.broadcom.com/external/article/409099)
-
-**③ `OpenTofu-Policy-Read` — vCenter 최상위의 조회용**
-
-- **VM storage policies → View VM storage policies**만 선택한다. 권한 ID는 `StorageProfile.View`다.
-- Provider가 스토리지 정책 정보를 읽는 데 사용한다. 정책을 생성·변경·적용하는 관리자 권한은 아니다.
 
 `Change Swapfile Placement`는 Rocky 내부의 swap 파티션을 만드는 권한이 아니다. VMware가 사용하는 VM swap 파일의 배치 정책이며, 이 Provider는 기본값도 설정하므로 직접 HCL에 쓰지 않아도 권한이 필요하다. 또한 태그와 커스터마이징·전원 이벤트를 조회하므로 읽기 접근도 유지해야 한다. **태그를 읽기 위해 태그 생성·수정 권한을 일괄 선택하지는 않는다.** [Provider 2.17.1의 추가 권한 안내](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md#notes-on-required-privileges)
 
@@ -210,13 +196,13 @@ vSphere Client에 사용자·Role·권한을 관리할 수 있는 관리자 계�
 
 **공통 연결 방법**
 
-대상 객체 선택 → **권한(Permissions)** 탭 → **권한 추가(Add Permission, +)** → 도메인과 사용자 `svc-opentofu` 선택 → Role 선택 → **하위 항목으로 전파(Propagate to children)** 지정 → 확인 순서다. Role 정의 화면이 아니라 **권한을 적용할 대상 객체의 화면**에서 연결한다.
+대상 객체 선택 → **권한(Permissions)** 탭 → **권한 추가(Add Permission, +)** → 도메인과 사용자 `svc-opentofu` 선택 → Role `OpenTofu` 선택 → **하위 항목으로 전파(Propagate to children)** 지정 → 확인 순서다. 아래 대상에는 모두 같은 Role을 연결한다. Role 정의 화면이 아니라 **권한을 적용할 대상 객체의 화면**에서 연결한다.
 
 **① 원본 템플릿과 목적지 VM 폴더**
 
 경로: **메뉴 → 인벤토리 → VM 및 템플릿(VMs and Templates) 보기 → vCenter → Datacenter → 대상 폴더 → 권한**.
 
-- 목적지 `Lab/opentofu` 폴더에 `OpenTofu-VM`을 연결하고 **하위 전파를 켠다**. 이후 그 안에 생성되는 VM이 권한을 상속한다.
+- 목적지 `Lab/opentofu` 폴더에 `OpenTofu`를 연결하고 **하위 전파를 켠다**. 이후 그 안에 생성되는 VM이 권한을 상속한다.
 - 이 글의 원본은 `Templates/rocky-9.6-base-v1`이다. `Templates` 폴더 전체가 아니라 **사용할 템플릿 하나**를 선택해 같은 Role을 연결하고 하위 전파는 끈다.
 - 원본 템플릿과 새 VM을 같은 실습 폴더 안에 두면 그 폴더 한 곳에 연결해도 된다. 이 경우 뒤의 `template_path`도 실제 이동한 경로로 바꾼다. 예: `Lab/opentofu/rocky-9.6-base-v1`.
 
@@ -224,7 +210,7 @@ vSphere Client에 사용자·Role·권한을 관리할 수 있는 관리자 계�
 
 경로: **메뉴 → 인벤토리 → 호스트 및 클러스터(Hosts and Clusters) 보기 → vCenter → Datacenter → 목적지 Cluster → 권한**.
 
-- 이 글은 `Lab-Cluster`의 기본 Resource Pool을 쓰므로 Cluster에 `OpenTofu-Placement`를 연결하고 **하위 전파를 켠다**.
+- 이 글은 `Lab-Cluster`의 기본 Resource Pool을 쓰므로 Cluster에 `OpenTofu`를 연결하고 **하위 전파를 켠다**. 같은 Role의 VM 관리 권한도 그 범위에 전파될 수 있으므로 실습 Cluster를 사용한다.
 - 특정 Resource Pool을 쓰는 구성이라면 Cluster를 펼쳐 그 **Resource Pool → 권한**에서 연결한다. 하위 pool도 사용할 때만 그 범위로 전파한다. 코드의 `resource_pool_id`도 그 pool로 맞춰야 한다.
 - Cluster 아래 Host까지 VM 관리 Role을 따로 연결하지 않는다. 독립 Host의 기본 pool을 쓰는 구성은 Host 쪽에서 배치 권한을 연결하고, Cluster를 조회하는 코드도 바꿔야 한다. [Broadcom의 연결·전파 절차](https://knowledge.broadcom.com/external/article/409099)
 
@@ -232,21 +218,23 @@ vSphere Client에 사용자·Role·권한을 관리할 수 있는 관리자 계�
 
 경로: **메뉴 → 인벤토리 → 스토리지(Storage) 보기 → vCenter → Datacenter → 목적지 datastore → 권한**.
 
-`lab-datastore` 자체에 `OpenTofu-VM`을 연결하고 **하위 전파를 끈다**. datastore 내부의 파일 브라우저에서 폴더를 선택하는 것이 아니다. 이 대상에서 사용하는 권한은 `Allocate space`다.
+`lab-datastore` 자체에 `OpenTofu`를 연결하고 **하위 전파를 끈다**. datastore 내부의 파일 브라우저에서 폴더를 선택하는 것이 아니다. 이 대상에서 사용하는 권한은 `Allocate space`다.
 
 **④ 목적지 Port group**
 
 경로: **메뉴 → 인벤토리 → 네트워킹(Networking) 보기 → vCenter → Datacenter → 목적지 Port group → 권한**.
 
-`lab-management`에 `OpenTofu-VM`을 연결하고 **하위 전파를 끈다**. 분산 Port group이라면 해당 Distributed Switch 아래에서 실제 Port group을 선택한다. 네트워크 연결을 허용하는 절차이지 Switch·VLAN 구성을 바꾸는 권한을 주는 절차는 아니다.
+`lab-management`에 `OpenTofu`를 연결하고 **하위 전파를 끈다**. 분산 Port group이라면 해당 Distributed Switch 아래에서 실제 Port group을 선택한다. 네트워크 연결을 허용하는 절차이지 Switch·VLAN 구성을 바꾸는 권한을 주는 절차는 아니다.
 
 **⑤ vCenter 최상위 객체**
 
 경로: **메뉴 → 인벤토리 → 호스트 및 클러스터 보기 → 인벤토리 트리의 vCenter 이름 → 권한**.
 
-Datacenter가 아니라 그 위의 **vCenter 객체**를 선택해 `OpenTofu-Policy-Read`를 연결한다. 이 가이드는 Broadcom의 스토리지 정책 조회 권한 절차에 따라 **하위 전파를 켠다**. `OpenTofu-VM`을 최상위에 연결하는 것과는 다르다. [Broadcom: StorageProfile.View의 적용 위치와 전파](https://knowledge.broadcom.com/external/article/384777)
+Datacenter가 아니라 그 위의 **vCenter 객체**를 선택해 `OpenTofu`를 연결하고 **하위 전파는 끈다**. 통합 Role 전체를 하위 객체로 전파하지 않기 위한 설정이다.
 
-역할은 세 개지만 사용자는 하나다. 같은 사용자가 VM 폴더에서는 VM을 관리하고, Cluster에서는 배치만 하며, vCenter 최상위에서는 스토리지 정책만 조회하도록 **작업 범위**를 나눈 구성이다.
+Broadcom의 스토리지 정책 권한 해결 절차에는 하위 전파를 켜는 단계가 있지만, VM 생성·삭제까지 담긴 이 통합 Role을 그대로 전파하면 관리 범위가 넓어진다. 최상위에 `StorageProfile.View`가 연결됐는지 확인하고, 아래 실행 단계에서 실제 정책 조회 결과를 확인한다. 조회 오류가 남으면 전파를 무조건 켜지 말고 권한 적용 범위를 다시 확인한다. [Broadcom: StorageProfile.View의 적용 위치와 전파](https://knowledge.broadcom.com/external/article/384777)
+
+**사용자 하나 + Role 하나 + 대상별 권한 연결** 구조다. 같은 Role을 여러 자원에 재사용하되, 하위 전파는 연결 대상마다 따로 지정한다.
 
 </details>
 
@@ -269,7 +257,7 @@ Datacenter가 아니라 그 위의 **vCenter 객체**를 선택해 `OpenTofu-Pol
 | `Resource.AssignVMToPool` | 실제 사용할 Resource Pool·Cluster의 전파 |
 | `Datastore.AllocateSpace` | 선택한 datastore |
 | `Network.Assign` | 선택한 Port group |
-| `StorageProfile.View` | vCenter 최상위의 조회 전용 Role |
+| `StorageProfile.View` | vCenter 최상위에 연결한 Role의 정책 조회 권한 |
 | `VirtualMachine.Config.SwapPlacement` | 생성 VM에 상속되는 VM Role |
 
 필요한 자원이 보이지 않으면 해당 객체와 탐색 경로의 조회 권한도 확인한다. 권한 오류를 해결하려고 모든 범주를 체크하거나 API 사용자를 관리자 그룹에 넣지는 않는다.
