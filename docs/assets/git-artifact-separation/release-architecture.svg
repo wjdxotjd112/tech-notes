@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 850" role="img" aria-labelledby="title desc">
+  <title id="title">Git 경량화 이후 릴리스와 고객사 설치 구조</title>
+  <desc id="desc">Gitea 코드와 Nexus 설치 재료를 Runner가 수집해 TAR로 게시한다. 사업팀은 HAProxy의 고정 주소를 통해 실제 TAR를 받고, 고객사에서 deploy.sh로 Private Nexus와 Ansible 컨테이너를 기동한다.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#2563eb"/></marker></defs>
+  <rect x="4" y="4" width="552" height="842" rx="12" fill="#eff5ff"/>
+  <g fill="#fff" stroke="#0b1f3a" stroke-width="1.5">
+    <rect x="24" y="60" width="248" height="90" rx="8"/>
+    <rect x="288" y="60" width="248" height="90" rx="8"/>
+    <rect x="60" y="204" width="440" height="86" rx="8"/>
+    <rect x="60" y="344" width="440" height="86" rx="8"/>
+    <rect x="60" y="484" width="440" height="86" rx="8"/>
+    <rect x="60" y="651" width="440" height="72" rx="8"/>
+    <rect x="24" y="764" width="248" height="64" rx="8"/>
+    <rect x="288" y="764" width="248" height="64" rx="8"/>
+  </g>
+  <g font-family="Pretendard,Malgun Gothic,Apple SD Gothic Neo,sans-serif" text-anchor="middle" fill="#1e293b">
+    <text x="280" y="37" font-size="24" font-weight="700">사내 · 코드 관리와 패키징</text>
+    <text x="148" y="92" font-size="23" font-weight="700">Gitea</text>
+    <text x="148" y="124" font-size="19">코드 · manifest · 태그</text>
+    <text x="412" y="92" font-size="23" font-weight="700">Nexus · 설치 재료</text>
+    <text x="412" y="124" font-size="19">Docker 이미지 · Raw 파일</text>
+    <text x="280" y="238" font-size="24" font-weight="700">Actions → 호스트 Runner</text>
+    <text x="280" y="269" font-size="21">재료 수집 → 릴리스 TAR 생성</text>
+    <text x="280" y="378" font-size="24" font-weight="700">Nexus · 최종 Bundle</text>
+    <text x="280" y="409" font-size="21">릴리스 계열별 최신 2개 보관</text>
+    <text x="280" y="518" font-size="24" font-weight="700">사업팀 · 고정 주소로 다운로드</text>
+    <text x="280" y="549" font-size="21">HAProxy → 실제 TAR 주소</text>
+    <text x="280" y="624" font-size="24" font-weight="700">고객사 · TAR 하나 반입</text>
+    <text x="280" y="680" font-size="23" font-weight="700">압축 해제 → deploy.sh</text>
+    <text x="280" y="708" font-size="19">런타임 준비 · 재료 적재 · 컨테이너 기동</text>
+    <text x="148" y="791" font-size="22" font-weight="700">Private Nexus</text>
+    <text x="148" y="815" font-size="18">반입한 재료 공급</text>
+    <text x="412" y="791" font-size="22" font-weight="700">Ansible 컨테이너</text>
+    <text x="412" y="815" font-size="18">OpenStack 구축 실행</text>
+  </g>
+  <g fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M148 150V176H240V202"/><path d="M412 150V176H320V202"/>
+    <path d="M280 290V342"/><path d="M280 430V482"/>
+    <path d="M280 570V598"/>
+    <path d="M220 723V744H148V762"/><path d="M340 723V744H412V762"/>
+  </g>
+  <g font-family="Pretendard,Malgun Gothic,sans-serif" font-size="19" fill="#3d4d63" text-anchor="middle">
+    <text x="280" y="323">TAR・체크섬 게시</text>
+    <text x="280" y="465">current 연결 · 302 리다이렉트</text>
+  </g>
+</svg>
