@@ -94,7 +94,7 @@ CA 파일은 환경 관리자가 제공한 인증서를 사용한다. IP로 접�
 VM 생성 이후의 연결은 별도로 확인한다.
 
 ```bash
-ssh labuser@192.0.2.101
+ssh root@192.0.2.101
 ```
 
 HTTPS 443은 실행 서버→vCenter, SSH 22는 실행 서버→게스트 VM의 연결이다. 템플릿 다운로드·Provider 설치에는 별도로 인터넷 또는 패키지 미러 접근이 필요하다. [vSphere API](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/), [Provider 인증·TLS 옵션](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md)
@@ -108,7 +108,7 @@ vCenter API 계정과 Rocky SSH 계정을 구분한다.
 | 계정 | 어디에 사용 | 필요한 작업 |
 | --- | --- | --- |
 | vCenter API 계정 | vSphere Provider | 객체 조회, VM 복제·설정 변경·전원·삭제 |
-| `labuser` | Rocky 게스트 | SSH, 이후 Ansible 실행에 필요한 sudo |
+| `root` | Rocky 게스트 | Runner의 공개키로 SSH 접속. 별도 sudo 정책 불필요 |
 
 **사용자를 만들고 Role을 정의하는 것만으로는 권한이 생기지 않는다.** Role은 허용할 작업의 목록이다. 실제 권한은 인벤토리의 특정 대상에 **사용자 + Role**을 연결해야 생긴다. 예를 들어 VM 폴더에 연결한 권한은 그 폴더의 VM을 관리하는 권한이지, 다른 계층의 datastore·네트워크를 사용하는 권한은 아니다.
 
@@ -266,13 +266,28 @@ Broadcom의 스토리지 정책 권한 해결 절차에는 하위 전파를 켜�
 
 ## 4. Rocky Linux 9.6 템플릿 준비
 
-처음에는 **NIC 1개, SCSI OS 디스크 1개**로 단순한 기본 VM을 준비한다. 아래 코드는 이 구조를 가정한다. 추가 디스크·NIC·vTPM이 있는 템플릿은 장치 정의와 복제 조건을 별도로 맞춰야 한다.
+템플릿은 복제에 사용할 원본 VM이다. **Rocky Linux 9.6을 설치한 일반 VM에서 기본 준비를 끝내고, 전원을 끈 뒤 템플릿으로 전환**하는 순서로 진행한다.
 
-<p class="subsection-title"><strong>4-1. 게스트 안에서 준비할 것</strong></p>
+현재 준비 기준은 다음과 같다.
+
+| 항목 | 준비 상태·방식 |
+| --- | --- |
+| OS | Rocky Linux 9.6 설치·기본 설정 완료 |
+| VMware Tools·SSH | `open-vm-tools`, `perl`, `openssh-server` 설치 및 서비스 활성화 |
+| 접속 계정 | `root` 사용. SSH 방화벽 허용 |
+| 가상 NIC | `ens33`, `ens34`, `ens35`, `ens36`, `ens38` 연결 확인. IP 미할당·UP 상태 |
+| cloud-init | 사용하지 않음 |
+| 호스트명·고정 IP | 원본에 최종 값을 넣지 않고 복제할 때 OpenTofu에서 지정 |
+| SSH 공개키 | 아직 미등록. 복제할 때 VMware Tools 스크립트로 등록하는 방식 선택 가능 |
+| 게스트 커스터마이징 별도 설정 | 호환성 파일이나 vCenter의 저장된 커스터마이징 규격은 아직 구성하지 않음 |
+
+원본 VM에 IP가 없어도 템플릿으로 전환할 수 있다. 다만 **VMware Tools 설치만으로 공개키가 자동 등록되지는 않는다.** 공개키 자동 등록을 선택한다면 아래의 스크립트 실행 허용을 먼저 준비한다.
+
+<p class="subsection-title"><strong>4-1. 원본 VM에서 준비한 패키지와 서비스</strong></p>
 
 <div class="section-body" markdown="1">
 
-템플릿으로 바꿀 원본 Rocky VM에서 실행한다.
+원본 VM에서 진행한 준비 명령이다.
 
 ```bash
 cat /etc/rocky-release
@@ -282,47 +297,93 @@ rpm -q open-vm-tools perl
 systemctl is-active vmtoolsd sshd
 ```
 
-VMware Tools는 IP 정보와 게스트 상태를 보고하며 커스터마이징을 처리한다. 실행 서버에서 Rocky의 IP를 바꾸는 SSH 스크립트를 따로 보내는 방식과 구분된다. [open-vm-tools 역할](https://github.com/vmware/open-vm-tools/blob/master/README.md)
+`enable --now`는 지금 서비스를 시작하고 다음 부팅에도 자동으로 시작하도록 설정한다. 마지막 명령에서 `vmtoolsd`, `sshd`가 각각 `active`인지 확인한다.
 
-추가 준비 항목:
+VMware Tools는 vCenter에 게스트 상태를 보고하고, 복제 시 요청된 호스트명·IP 등의 초기 설정을 처리한다. 별도의 cloud-init 구성 없이 VMware Tools 기반의 경로를 사용한다. [open-vm-tools 역할](https://github.com/vmware/open-vm-tools/blob/master/README.md)
 
-- `labuser`와 SSH 공개키, 필요한 sudo 정책 준비. 비밀번호·개인키를 템플릿에 공통으로 복제하지 않음.
-- SSH가 사용하는 firewalld zone에서 접속 허용 여부 확인.
-- OS 디스크·LVM 구성 확인. 가상 디스크 확장과 OS 파일시스템 확장은 별도 작업.
-- NetworkManager 연결 프로필과 cloud-init 사용 여부 확인. IP를 바꾸는 주체를 중복 운영하지 않음.
-- Nexus 이미지·대형 캐시·기존 클러스터 설정을 기본 템플릿에 넣지 않고 역할별 설치 과정에서 배치.
+인터페이스 확인은 다음 조회로 충분하다. `ip -br link`에서 장치 이름과 UP 상태를, `ip -br -4 address`에서 고정 IPv4 미할당 상태를 확인한다. IPv6 link-local 주소가 보이는 것과 고정 IPv4를 설정한 것은 다르다.
 
 ```bash
-nmcli device status
-nmcli connection show
-systemctl is-active NetworkManager
-rpm -q cloud-init
-lsblk -f
-sudo firewall-cmd --get-active-zones
+ip -br link
+ip -br -4 address
 ```
 
-cloud-init이 설치돼 있으면 VMware 커스터마이징과 어느 방식으로 초기화할지 먼저 정한다. 이 예제는 VMware Tools 기반의 일반 게스트 커스터마이징을 사용한다. cloud-init도 동일한 네트워크를 다시 설정하도록 남겨 두지 않는다.
+`ens38`처럼 번호가 건너뛰는 이름 자체는 문제가 아니다. 복제 코드의 NIC·Port group 선언 순서를 실제 가상 장치 순서에 맞춘다. 게스트 IP 설정도 같은 순서를 따른다. **빈 `network_interface {}`는 IP 미설정이 아니라 DHCP 요청**이므로 IP 없이 사용할 인터페이스와 구분해야 한다. [Provider의 NIC·IP 설정 순서](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#network-interface-settings)
+
+뒤의 5번은 NIC 1개·SCSI OS 디스크 1개인 최소 학습 예제다. 여러 NIC·디스크를 가진 이 템플릿에 사용할 때는 장치 정의를 원본 구성에 맞게 확장한다.
 
 </div>
 
-<p class="subsection-title"><strong>4-2. Rocky 게스트 커스터마이징</strong></p>
+<p class="subsection-title"><strong>4-2. 공개키를 붙여넣지 않고 복제할 때 등록하기</strong></p>
 
 <div class="section-body" markdown="1">
 
-VM이 부팅되는 것과 게스트 커스터마이징 지원 여부는 별개다. vCenter·ESXi·VMware Tools 버전에 맞는 게스트 OS 지원 범위를 확인해야 한다.
+OpenTofu의 vSphere Provider는 `clone.customize.linux_options.script_text`로 복제 VM 안에서 실행할 스크립트를 전달할 수 있다. **Runner의 공개키 파일 → OpenTofu → vCenter → VMware Tools → 복제 VM의 `authorized_keys`**로 이어진다. 키 전달에 게스트 SSH 접속은 필요하지 않다. [Provider의 `script_text`](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#linux-customization-options)
 
-Rocky가 커스터마이징 단계에서 미지원 배포판으로 인식되는 경우, Broadcom은 호환 배포판의 커스터마이징 방법을 지정하는 방식을 안내한다. **vCenter 8.0 U3 이상**에 제공되는 방법 중 RHEL 9 계열은 `GOSC_METHOD_8`이다. 아래 설정은 해당 조건에서 호환 방법을 명시할 때 사용하는 내용이다. [Broadcom 공식 안내](https://knowledge.broadcom.com/external/article/313164/configure-a-guest-customization-method-f.html)
+아래는 기존 준비에 더할 절차다. 원본 VM의 콘솔에서 스크립트 실행을 허용한다. 공개키를 콘솔에 입력할 필요는 없다.
 
-원본 VM의 `/etc/vmware-tools/customization.conf`에 기존 설정을 확인하고 다음 섹션을 반영한다.
-
-```ini title="/etc/vmware-tools/customization.conf"
-[GOSC]
-COMPATIBILITY=GOSC_METHOD_8
+```bash title="원본 VM — 공개키 자동 등록을 사용할 때 추가 준비"
+sudo vmware-toolbox-cmd config set deployPkg enable-custom-scripts true
+vmware-toolbox-cmd config get deployPkg enable-custom-scripts
 ```
 
-vCenter 8.0 U3보다 오래된 환경에 이 설정만 넣어 지원되는 것으로 간주하면 안 된다. vCenter 버전별 지원 조건을 먼저 확인한다.
+이 옵션은 기본적으로 꺼져 있다. 활성화하면 게스트 커스터마이징에 전달된 스크립트를 실행할 수 있으므로 이 VM을 복제·커스터마이징할 권한도 함께 관리한다. [Broadcom의 실행 허용·호출 시점 안내](https://knowledge.broadcom.com/external/article/313048/setting-the-customization-script-for-vir.html)
 
-템플릿 확정 전에 수동으로 한 대를 복제해 IP·호스트명 변경과 SSH 접속을 확인하면, 템플릿 문제와 OpenTofu 코드 문제를 분리하기 쉽다.
+**저장된 커스터마이징 규격을 만드는 작업과, 복제할 때 `customize`로 값을 전달하는 작업은 다르다.** 여기서는 별도의 규격을 미리 만들지 않고 OpenTofu 코드에서 호스트명·IP·공개키 등록 스크립트를 함께 전달한다.
+
+<details class="analysis-toggle" markdown="1">
+<summary>OpenTofu 코드에 공개키 파일 경로와 등록 스크립트 넣기</summary>
+
+실행 위치는 Runner의 OpenTofu 프로젝트다. 뒤의 5번에서 프로젝트 파일을 만든 다음 아래 내용을 추가한다. 템플릿 준비 명령과 구분되는 **복제 시 적용할 코드 예시**다.
+
+`variables.tf`에 공개키 파일 경로를 선언한다.
+
+```hcl title="variables.tf — 추가"
+variable "ssh_public_key_path" {
+  type        = string
+  description = "VM에 등록할 Runner의 SSH 공개키 파일 경로"
+}
+```
+
+`lab.tfvars`에는 실제로 SSH를 실행할 계정의 `.pub` 파일 경로를 넣는다. 다음 경로는 예시이며 Runner의 키 위치에 맞게 바꾼다. 개인키는 VM에 전달하지 않는다.
+
+```hcl title="lab.tfvars — 추가"
+ssh_public_key_path = "/var/lib/gitea-runner/.ssh/id_ed25519.pub"
+```
+
+`main.tf`의 기존 `clone → customize → linux_options`를 다음처럼 확장한다. 기존 NIC·IP·게이트웨이 설정은 그대로 두고, 새로운 `linux_options` 블록을 중복 추가하지 않는다.
+
+```hcl title="main.tf — 기존 linux_options 교체"
+linux_options {
+  host_name = each.key
+  domain    = var.domain
+
+  script_text = <<-SCRIPT
+    #!/bin/sh
+    set -eu
+    [ "$1" = "postcustomization" ] || exit 0
+
+    install -d -m 700 /root/.ssh
+    touch /root/.ssh/authorized_keys
+    key="$(printf '%s' '${base64encode(trimspace(file(pathexpand(var.ssh_public_key_path))))}' | base64 -d)"
+    grep -qxF -- "$key" /root/.ssh/authorized_keys || printf '%s\n' "$key" >> /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
+    chown root:root /root/.ssh /root/.ssh/authorized_keys
+    restorecon -R /root/.ssh
+  SCRIPT
+}
+```
+
+- `file(...)`은 OpenTofu 실행 서버에서 공개키 내용을 읽는다.
+- Base64는 긴 키를 스크립트에 전달하기 위한 인코딩이며 암호화가 아니다. VM 안에서 원래 내용으로 복원한다.
+- `postcustomization` 시점에만 등록하고, 같은 키가 있으면 중복 추가하지 않는다.
+- 디렉터리·파일 권한과 SELinux 컨텍스트를 맞춘다. 이 스크립트는 `root` 로그인 설정 자체는 바꾸지 않는다.
+
+테스트 Runner와 실제 Runner가 다른 키를 사용하면 복제 시 해당 Runner의 공개키 경로만 바꾼다. 이 방식이라면 **Runner가 바뀔 때마다 템플릿을 다시 만들 필요가 없다.**
+
+처음에는 VM 한 대로 IP·호스트명 설정과 공개키 접속을 확인한 뒤 여러 대로 늘린다. vCenter·Tools·Rocky의 게스트 커스터마이징 호환성과 실제 SSH 실행 계정의 키 선택이 맞아야 한다. `[확인 필요]` 첫 복제 VM의 스크립트 실행·SSH 접속 결과.
+
+</details>
 
 </div>
 
@@ -330,16 +391,22 @@ vCenter 8.0 U3보다 오래된 환경에 이 설정만 넣어 지원되는 것�
 
 <div class="section-body" markdown="1">
 
-1. VM 설정에서 OS 종류·BIOS/EFI·SCSI Controller·NIC를 확인한다. 학습 예제는 vTPM 없는 기본 VM을 사용한다.
-2. vSphere Client Summary에서 VMware Tools 실행 상태와 게스트 IP를 확인한다.
-3. 복제 시 서로 달라야 할 machine-id·SSH 호스트키 등의 초기화 방식을 준비한다. 공통 사용자 공개키와 SSH 호스트키는 다르다.
-4. ISO 연결과 불필요한 파일을 정리하고 원본 VM을 정상 종료한다.
-5. VM 우클릭 → **Template → Convert to Template**으로 전환한다.
-6. VMs and Templates에서 `Templates/rocky-9.6-base-v1` 같은 경로로 보관한다.
+현재는 아직 원본 VM 상태다. 공개키 자동 등록을 선택했다면 4-2의 실행 허용까지 마친 뒤 다음 순서로 전환한다.
 
-machine-id와 SSH 호스트키를 지우기만 하고 복제 후 재생성을 준비하지 않으면 서비스가 정상 기동하지 않을 수 있다. 자동 재생성·초기화는 사용하는 OS 이미지 절차에 맞추고, 복제본 간 값이 달라지는지 확인한다.
+1. **메뉴 → 인벤토리 → VM 및 템플릿(VMs and Templates)** 보기에서 원본 VM을 선택한다.
+2. **요약(Summary)**에서 VMware Tools 실행 상태를 확인한다. IP 미할당 상태라면 게스트 IP가 비어 있는 것은 준비 실패가 아니다.
+3. **설정 편집(Edit Settings) → CD/DVD 드라이브**에서 설치 ISO 연결과 전원 켤 때 연결 옵션을 해제한다.
+4. 원본 VM 콘솔에서 아래 명령으로 정상 종료한다.
 
-템플릿은 덮어쓰기보다 `base-v1`, `base-v2`처럼 변경 내용을 구분해 관리하면 복제 기준을 추적하기 쉽다.
+    ```bash
+    sudo shutdown -h now
+    ```
+
+5. vSphere Client에서 전원 꺼짐을 확인한다.
+6. VM 우클릭 → **템플릿(Template) → 템플릿으로 변환(Convert to Template)**을 선택한다.
+7. 템플릿 이름과 폴더 경로를 확인한다. 뒤의 `template_path`에는 Datacenter의 VM 루트 기준 경로를 넣는다. 예: `Templates/rocky-9.6-base-v1`.
+
+템플릿 전환 자체가 게스트 IP·호스트명·SSH 공개키를 설정하는 것은 아니다. 이 값은 뒤의 OpenTofu 복제 과정에서 적용한다. Rocky의 게스트 커스터마이징이 실패할 때는 해당 vCenter·Tools 버전의 지원 조건을 확인한다. 호환성 설정을 적용하지 않은 현재 준비와, 오류가 발생했을 때의 추가 조치를 구분한다. [Rocky 호환 배포판 설정 안내](https://knowledge.broadcom.com/external/article/313164/configure-a-guest-customization-method-f.html)
 
 </div>
 
@@ -636,7 +703,7 @@ tofu state list
 vSphere Client의 **Recent Tasks**에서 Clone virtual machine, Reconfigure, Power on, Customization 관련 작업을 확인한다. 게스트에 들어가 설정 결과를 확인한다.
 
 ```bash
-ssh labuser@192.0.2.101
+ssh root@192.0.2.101
 hostnamectl
 ip -br address
 ip route
