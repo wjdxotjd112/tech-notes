@@ -53,6 +53,8 @@ tags:
 
 처음에는 단순했다. Git만 받으면 코드와 설치 재료가 함께 왔다. 하지만 이미지와 프로그램 버전을 계속 교체하면서, Git이 소스 관리뿐 아니라 대용량 배포 파일의 이력 보관까지 맡게 됐다.
 
+---
+
 ## 2. 왜 불편했는가 — 개발과 반입 모두 무거워졌다
 
 **개발자는 코드가 필요해도 이미지를 함께 받아야 했다.** 새 작업 환경에서 저장소를 받을 때 현재 이미지뿐 아니라 과거에 교체한 파일 이력도 따라왔다. 코드 변경과 직접 관련 없는 다운로드와 디스크 사용이 작업의 시작 비용이 됐다.
@@ -95,6 +97,8 @@ Git은 파일 내용을 blob이라는 객체로 저장한다. pack은 여러 객
 
 </details>
 
+---
+
 ## 3. 검토한 방법 — shallow clone과 LFS의 범위
 
 먼저 `--depth=1`로 최신 커밋만 받는 shallow clone을 시험했다. 과거 이력을 받지 않는 데는 도움이 됐지만, 최신 커밋에 들어 있는 대형 파일은 여전히 함께 내려왔다. 사내 Git 저장소 자체의 이미지 누적 구조도 바뀌지 않았다.
@@ -119,6 +123,8 @@ Git LFS도 검토했다. LFS는 Git에는 작은 포인터를 남기고, 파일 
 [LFS fetch](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-fetch.adoc), [LFS migrate](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-migrate.adoc)
 
 </details>
+
+---
 
 ## 4. 개선한 구조 — 코드·설치 재료·반입물을 분리했다
 
@@ -176,6 +182,8 @@ Runner는 소스를 shallow clone하고, manifest를 게시한 뒤 코드·Raw �
 
 </details>
 
+---
+
 ## 5. 결과와 최종 아키텍처 — 사업팀은 TAR 하나를 가져간다
 
 최종 전달물은 `contrabass-engine-deploy.tar`다. 사업수행팀은 전체 현재 릴리스 또는 필요한 계열의 현재 릴리스를 선택해 다운로드한다.
@@ -187,7 +195,7 @@ Runner는 소스를 shallow clone하고, manifest를 게시한 뒤 코드·Raw �
 
 위 경로는 다운로드 진입점이다. 실제 파일은 Nexus의 릴리스별 경로에 보관하고, HAProxy가 연결한다. 4.2가 출시된 뒤에도 4.1 계열을 선택해 해당 계열의 현재 패키지를 받을 수 있다.
 
-[![Git 코드와 Nexus 재료가 Runner에서 반입 TAR로 묶이고 고객사에서 Nexus와 Ansible을 기동하는 구조](../assets/git-artifact-separation/release-architecture.svg)](../assets/git-artifact-separation/release-architecture.svg)
+[![Git 코드와 Nexus 재료가 Runner에서 반입 TAR로 묶이고 고객사에서 Nexus와 Ansible을 기동하는 구조](../assets/git-artifact-separation/release-architecture.svg){ .architecture-diagram }](../assets/git-artifact-separation/release-architecture.svg)
 
 TAR에는 코드와 필요한 이미지·파일뿐 아니라 **Nexus 자체 이미지, containerd·nerdctl 등 초기 기동 재료와 `deploy.sh`**를 함께 넣는다. Nexus가 아직 없는 고객사에서도 설치를 시작할 수 있어야 하기 때문이다.
 
