@@ -123,18 +123,19 @@ vCenter API 계정과 Rocky SSH 계정을 구분한다.
 
 아래는 **기존 템플릿 복제, CPU·메모리 변경, 고정 IP 설정, 전원 조작, VM 삭제**를 위한 구성이다. 탐색 경로는 한글 vSphere Client 기준으로 적고, 권한 체크박스는 영문 이름을 함께 사용한다. `메뉴`에 인벤토리만 보이는 화면에서는 **메뉴 → 인벤토리**로 들어간 뒤 상단의 보기 아이콘을 바꾼다. 버전에 따라 보기 전환 항목이 메뉴에 직접 표시되기도 한다.
 
-| 권한을 연결할 대상 | 연결하는 이유 | 하위 항목으로 전파 |
-| --- | --- | --- |
-| 원본 템플릿과 VM을 만들 폴더 | 원본 복제, 목적지 VM 생성·관리 | 폴더는 켬. 원본 템플릿 하나에 직접 연결하면 끔 |
-| 목적지 Cluster 또는 Resource Pool | VM에 CPU·메모리 자원을 배정 | Cluster의 기본 pool을 쓰면 켬 |
-| 목적지 Datastore | 복제한 디스크를 저장 | 대상 datastore에 직접 연결, 끔 |
-| 목적지 Port group | 가상 NIC를 네트워크에 연결 | 대상 네트워크에 직접 연결, 끔 |
-| vCenter 최상위 객체 | 스토리지 정책 조회 | 통합 Role의 VM 권한이 확산되지 않도록 끔 |
+| 권한을 연결할 대상 | 연결하는 이유 | 사용할 Role | 하위 항목으로 전파 |
+| --- | --- | --- | --- |
+| 원본 템플릿과 VM을 만들 폴더 | 원본 복제, 목적지 VM 생성·관리 | `OpenTofu` | 폴더는 켬. 원본 템플릿 하나에 직접 연결하면 끔 |
+| 목적지 Cluster 또는 Resource Pool | VM에 CPU·메모리 자원을 배정 | `OpenTofu` | Cluster의 기본 pool을 쓰면 켬 |
+| 목적지 Datastore | 복제한 디스크를 저장 | `OpenTofu` | 대상 datastore에 직접 연결, 끔 |
+| 목적지 Port group | 가상 NIC를 네트워크에 연결 | `OpenTofu` | 대상 네트워크에 직접 연결, 끔 |
+| vCenter 최상위 객체 | 스토리지 정책 조회 | `OpenTofu` | 통합 Role의 VM 권한이 확산되지 않도록 끔 |
+| 분산 스위치(VDS), 분산 Port group을 사용할 때 | Port group이 참조하는 스위치 설정 조회 | 기본 제공 `Read-only` | 스위치 자체에 연결, 끔 |
 
-연결 대상은 위의 **다섯 종류**다. 템플릿과 목적지 폴더가 분리돼 있으면 첫 번째 종류에서 두 곳에 연결한다. 이 글의 코드는 Cluster의 기본 Resource Pool을 사용하므로 **ESXi Host에 추가 관리 권한을 주는 절차는 넣지 않는다.**
+기본 연결 대상은 다섯 종류이며, **분산 Port group을 사용하면 해당 VDS의 조회 권한 연결이 추가**된다. 템플릿과 목적지 폴더가 분리돼 있으면 첫 번째 종류에서 두 곳에 연결한다. 이 글의 코드는 Cluster의 기본 Resource Pool을 사용하므로 **ESXi Host에 추가 관리 권한을 주는 절차는 넣지 않는다.**
 
 !!! warning "Role을 넓게 전파하지 않는다"
-    아래 구성은 필요한 권한을 Role 하나에 모은다. 이를 vCenter 최상위나 운영 Cluster에 연결하고 전파하면 VM 생성·삭제 권한도 하위 객체에 적용될 수 있다. vCenter 최상위의 전파는 끄고, Cluster 전파는 해당 실습 범위에 VM 관리 권한까지 허용해도 되는지 확인한다. 공유 운영 Cluster에서 배치 권한만 허용하려면 Role 분리가 필요하다.
+    아래 구성은 관리에 필요한 권한을 사용자 정의 Role 하나에 모은다. VDS 조회에는 기존의 기본 제공 Read-only Role을 사용한다. 관리 Role을 vCenter 최상위나 운영 Cluster에 연결하고 전파하면 VM 생성·삭제 권한도 하위 객체에 적용될 수 있다. vCenter 최상위의 전파는 끄고, Cluster 전파는 해당 실습 범위에 VM 관리 권한까지 허용해도 되는지 확인한다. 공유 운영 Cluster에서 배치 권한만 허용하려면 Role 분리가 필요하다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>3-1. 전용 API 사용자 만들기 — 관리 → Single Sign-On → 사용자 및 그룹</summary>
@@ -166,6 +167,7 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 | Virtual machine → Edit Inventory | Remove | `tofu destroy`로 생성 VM 삭제 |
 | Virtual machine → Change Configuration | Change CPU count | 예제의 `num_cpus` 적용 |
 | Virtual machine → Change Configuration | Change Memory | 예제의 `memory` 적용 |
+| Virtual machine → Change Configuration | Change resource / 리소스 변경 | VM의 CPU·메모리 예약량·제한값·shares 등 자원 할당 설정. 권한 ID는 `VirtualMachine.Config.Resource` |
 | Virtual machine → Change Configuration | Change Settings | VM의 일반 구성 변경 |
 | Virtual machine → Change Configuration | Modify device settings | 템플릿에서 이어받은 가상 장치의 설정 변경 |
 | Virtual machine → Change Configuration | Change Swapfile Placement | Provider가 기본 swap 배치 정책 설정 |
@@ -183,6 +185,8 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 
 `Deploy template`과 `Clone template`은 다르다. 이 실습은 **템플릿 → 일반 VM**이므로 `Deploy template`을 사용한다. 새 템플릿을 만드는 권한은 선택하지 않는다. [vSphere API: CloneVM_Task의 권한 조건](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#clone)
 
+**`Change resource`는 CPU 개수·메모리 크기 변경 권한과 별개다.** 한글 화면에서는 **가상 시스템(가상 머신) → 구성 변경 → 리소스 변경**에 해당한다. `VirtualMachine.Config.Resource` 오류가 나오면 새 Role을 만들지 않고 **메뉴 → 관리 → 액세스 제어 → 역할 → 기존 OpenTofu Role 편집**에서 이 항목을 추가한다. 템플릿과 같은 사양이어도 복제 후 재구성 요청에서 자원 할당 권한이 필요할 수 있다. [Broadcom: Change resource 누락 오류와 설정 경로](https://knowledge.broadcom.com/external/article/402628/increasing-cpu-count-on-a-vm-fails-with.html)
+
 뒤의 예제는 템플릿의 CPU·메모리·디스크 크기를 그대로 읽어 사용한다. 디스크 확장 권한은 기본 복제와 구분하고 실제 확장할 때만 추가한다. `nested_hv_enabled`와 `extra_config`는 서로 다른 설정이므로 같은 것으로 취급하지 않는다. [vSphere API: ReconfigVM_Task의 항목별 권한](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#reconfigure)
 
 `Change Swapfile Placement`는 Rocky 내부의 swap 파티션을 만드는 권한이 아니다. VMware가 사용하는 VM swap 파일의 배치 정책이며, 이 Provider는 기본값도 설정하므로 직접 HCL에 쓰지 않아도 권한이 필요하다. 또한 태그와 커스터마이징·전원 이벤트를 조회하므로 읽기 접근도 유지해야 한다. **태그를 읽기 위해 태그 생성·수정 권한을 일괄 선택하지는 않는다.** [Provider 2.17.1의 추가 권한 안내](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md#notes-on-required-privileges)
@@ -196,7 +200,7 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 
 **공통 연결 방법**
 
-대상 객체 선택 → **권한(Permissions)** 탭 → **권한 추가(Add Permission, +)** → 도메인과 사용자 `svc-opentofu` 선택 → Role `OpenTofu` 선택 → **하위 항목으로 전파(Propagate to children)** 지정 → 확인 순서다. 아래 대상에는 모두 같은 Role을 연결한다. Role 정의 화면이 아니라 **권한을 적용할 대상 객체의 화면**에서 연결한다.
+대상 객체 선택 → **권한(Permissions)** 탭 → **권한 추가(Add Permission, +)** → 도메인과 사용자 `svc-opentofu` 선택 → Role 선택 → **하위 항목으로 전파(Propagate to children)** 지정 → 확인 순서다. ①~⑤에는 같은 `OpenTofu` Role을 연결하고, ⑥의 VDS에는 기본 제공 `Read-only`를 사용한다. Role 정의 화면이 아니라 **권한을 적용할 대상 객체의 화면**에서 연결한다.
 
 **① 원본 템플릿과 목적지 VM 폴더**
 
@@ -234,7 +238,25 @@ Datacenter가 아니라 그 위의 **vCenter 객체**를 선택해 `OpenTofu`를
 
 Broadcom의 스토리지 정책 권한 해결 절차에는 하위 전파를 켜는 단계가 있지만, VM 생성·삭제까지 담긴 이 통합 Role을 그대로 전파하면 관리 범위가 넓어진다. 최상위에 `StorageProfile.View`가 연결됐는지 확인하고, 아래 실행 단계에서 실제 정책 조회 결과를 확인한다. 조회 오류가 남으면 전파를 무조건 켜지 말고 권한 적용 범위를 다시 확인한다. [Broadcom: StorageProfile.View의 적용 위치와 전파](https://knowledge.broadcom.com/external/article/384777)
 
-**사용자 하나 + Role 하나 + 대상별 권한 연결** 구조다. 같은 Role을 여러 자원에 재사용하되, 하위 전파는 연결 대상마다 따로 지정한다.
+**⑥ 분산 스위치 조회 — 분산 Port group을 사용할 때만**
+
+경로: **메뉴 → 인벤토리 → 네트워킹(Networking) 보기 → vCenter → Datacenter → 사용하는 분산 스위치(Distributed Switch) → 권한 → 권한 추가**.
+
+Port group이 아니라 **그 Port group을 제공하는 스위치 자체**를 선택한다. 같은 OpenTofu API 사용자를 선택하고 아래처럼 연결한다.
+
+| 항목 | 설정 |
+| --- | --- |
+| 역할 | 기본 제공 **읽기 전용(Read-only)** |
+| 하위 항목으로 전파 | **끔** |
+
+분산 Port group에 VM의 NIC를 연결하려면 Provider가 VDS의 UUID 등 설정을 조회해야 한다. `System.Read privilege required for config.distributedVirtualSwitch` 오류는 이 스위치를 읽을 권한이 없을 때 발생한다. **포트그룹에 권한을 줬다는 사실만으로 VDS의 조회 권한까지 생기지는 않는다.** [VMware govmomi 소스의 대상 객체 설명](https://github.com/vmware/govmomi/blob/main/object/distributed_virtual_portgroup.go)
+
+`System.Read`는 사용자 정의 Role에 기본 포함되는 시스템 권한이다. 이번 오류는 Role 편집에서 체크박스를 찾는 문제가 아니라, **조회할 스위치에 사용자와 Role을 연결하는 문제**다. 기본 Read-only Role이면 충분하며 새 Role 생성이나 Distributed switch 범주 전체 선택은 필요하지 않다. [공식 API의 기본 시스템 권한](https://developer.broadcom.com/xapis/virtual-infrastructure-json-api/latest/virtual-infrastructure/authorization-manager/), [VDS에 Read-only를 연결하고 전파를 끄는 사례](https://williamlam.com/2023/06/custom-vcenter-server-role-using-vsphere-terraform-provider-on-vmware-cloud-on-aws.html)
+
+!!! warning "포트그룹의 기존 Role은 유지"
+    ④의 Port group에는 `Network.Assign`이 포함된 OpenTofu Role을 유지한다. 이를 Read-only로 바꾸면 네트워크 할당 권한이 사라질 수 있다. VDS의 조회 권한과 Port group의 연결 권한은 각각 다른 대상에 설정한다.
+
+**사용자 정의 OpenTofu Role 하나를 여러 자원에 재사용하고, VDS에는 기본 Read-only를 추가 연결**하는 구조다. 하위 전파는 연결 대상마다 따로 지정한다.
 
 </details>
 
@@ -244,8 +266,8 @@ Broadcom의 스토리지 정책 권한 해결 절차에는 하위 전파를 켜�
 각 자원의 **권한(Permissions)** 탭에서 사용자·Role·상속 여부를 확인한다. 상위 객체에서 받은 항목은 직접 연결한 항목과 구분해서 보고, 상속받은 권한을 바꾸려면 연결한 상위 객체로 이동한다.
 
 1. 관리자 세션과 다른 브라우저 세션에서 `svc-opentofu@vsphere.local`로 로그인한다.
-2. 원본 템플릿·목적지 폴더·Cluster·Datastore·Port group을 조회할 수 있는지 확인한다.
-3. 뒤의 실행 절차에서 `VSPHERE_USER`에 이 계정을 입력하고, 비밀번호는 `VSPHERE_PASSWORD`로 전달한다. Rocky의 `labuser` 비밀번호와 혼동하지 않는다.
+2. 원본 템플릿·목적지 폴더·Cluster·Datastore·Port group을 조회할 수 있는지 확인한다. 분산 Port group을 사용하면 해당 VDS도 확인한다.
+3. 뒤의 실행 절차에서 `VSPHERE_USER`에 이 계정을 입력하고, 비밀번호는 `VSPHERE_PASSWORD`로 전달한다. Rocky의 `root` 로그인 정보와 혼동하지 않는다.
 4. `tofu plan`으로 조회와 계획을 확인한 뒤, 실습 VM 한 대를 `tofu apply`로 생성한다. 마지막에는 실습 VM을 `tofu destroy`로 삭제해 생성·전원·삭제 권한까지 확인한다.
 
 `plan`이 성공했다고 복제·전원·삭제 권한까지 확인된 것은 아니다. `NoPermission`이 발생하면 오류의 **대상 객체와 privilege ID**를 먼저 읽는다.
@@ -259,6 +281,8 @@ Broadcom의 스토리지 정책 권한 해결 절차에는 하위 전파를 켜�
 | `Network.Assign` | 선택한 Port group |
 | `StorageProfile.View` | vCenter 최상위에 연결한 Role의 정책 조회 권한 |
 | `VirtualMachine.Config.SwapPlacement` | 생성 VM에 상속되는 VM Role |
+| `VirtualMachine.Config.Resource` | 생성 VM에 적용된 Role의 **Change resource / 리소스 변경** |
+| `System.Read`와 `config.distributedVirtualSwitch` | Port group이 사용하는 **VDS 자체의 Read-only 연결** |
 
 필요한 자원이 보이지 않으면 해당 객체와 탐색 경로의 조회 권한도 확인한다. 권한 오류를 해결하려고 모든 범주를 체크하거나 API 사용자를 관리자 그룹에 넣지는 않는다.
 
@@ -815,6 +839,16 @@ tofu plan -var-file=lab.tfvars
 
 State에 VM이 연결돼 있으면 오류를 해결하고 새 계획으로 진행한다. vCenter에만 남은 객체는 기존 State 복구·import·실습 VM 정리 중 적절한 방법을 선택한다. 이름이 겹친다고 무작정 State 파일을 지우고 다시 만들지 않는다.
 
+권한 오류를 수정한 뒤에도 실패한 VM을 먼저 삭제하지 않는다. 원래 실행 디렉터리와 State를 유지한 채 새 계획을 만든다. 아래 `lab.tfvars`는 기존 실행에서 사용한 변수 파일로 맞춘다.
+
+```bash
+tofu state list
+tofu plan -var-file=lab.tfvars -out=retry.tfplan
+tofu show retry.tfplan
+```
+
+계획의 생성·수정·교체 대상을 확인한 뒤 `tofu apply retry.tfplan`으로 진행한다. 실패 전 저장한 `create.tfplan`을 무작정 재사용하거나 관리되지 않는 VM을 그대로 둔 채 같은 이름으로 다시 생성하지 않는다.
+
 **실습 VM 삭제**
 
 아래 계획은 **현재 State가 관리하는 VM**을 삭제한다. source 템플릿과 data source로 조회한 Cluster·Datastore·Port group은 삭제 대상이 아니다. 삭제된 게스트의 디스크와 데이터는 백업이 없으면 복구할 수 없다.
@@ -844,11 +878,15 @@ unset VSPHERE_USER VSPHERE_PASSWORD
 | Datacenter·Cluster 조회 실패 | 실제 이름·조회 권한 | Hosts and Clusters |
 | 템플릿을 찾지 못함 | Datacenter 기준 상대 폴더·이름 | VMs and Templates |
 | Permission denied | 원본·목적지·네트워크·스토리지 권한 | 오류 privilege, 각 객체 Permissions |
+| 재구성 중 `VirtualMachine.Config.Resource` 누락 | VM 자원 할당 변경 권한 | 기존 Role의 **가상 시스템 → 구성 변경 → 리소스 변경** |
+| `System.Read privilege required for config.distributedVirtualSwitch` | 분산 스위치 조회 권한 | **VDS → 권한 → API 사용자 + Read-only**, 전파 끔. Port group Role은 유지 |
 | 복제는 됐지만 OS 부팅 실패 | EFI/BIOS·컨트롤러·디스크 | VM 콘솔, 템플릿 설정 |
 | Customization timeout | Rocky 지원 조건·Tools·Perl·네트워크 초기화 충돌 | vCenter Events, 게스트 Tools 로그 |
 | Guest network timeout | 실제 IP·게이트웨이·Tools 보고 | VM 콘솔, Summary, nmcli |
 | 디스크 크기 오류 | 원본보다 작은 디스크 또는 다른 장치 구조 | 템플릿 Edit Settings |
 | SSH 접속 실패 | 라우팅·방화벽·sshd·계정 공개키 | VM 콘솔과 SSH 상세 로그 |
+
+**진행률이 높아도 권한 확인이 끝난 것은 아니다.** 템플릿 복제 뒤에 VM 재구성이 이어지므로 90%대에서 실패했다는 사실만으로 부족한 권한을 특정할 수 없다. vSphere Client의 **하단 최근 작업(Recent Tasks) → 실패한 작업 → 오류 상세**를 확인하고, 필요하면 **대상 VM → 모니터(Monitor) → 작업 및 이벤트(Tasks and Events)**에서 권한 ID와 대상을 찾는다. 실습에서는 `VirtualMachine.Config.Resource` 누락과 VDS의 `System.Read` 오류를 확인했고, 리소스 변경 권한 추가와 VDS Read-only 연결 후 해당 권한 오류 해소를 확인했다. VM 내부 배포·기능 시험 결과와는 구분한다.
 
 Rocky 콘솔에서 확인할 명령:
 
@@ -890,6 +928,9 @@ tofu output -json vm_info > vm-info.json
 - [OpenTofu 입문 가이드 - 1](2026-10-08-opentofu-basics.md)
 - [VMware vSphere Provider 2.17.1](https://github.com/vmware/terraform-provider-vsphere/tree/v2.17.1)
 - [Provider 인증·권한·지원 환경](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md)
+- [Change resource 누락 오류](https://knowledge.broadcom.com/external/article/402628/increasing-cpu-count-on-a-vm-fails-with.html)
+- [분산 Port group 연결 시 VDS 조회 권한](https://github.com/vmware/govmomi/blob/main/object/distributed_virtual_portgroup.go)
+- [VDS Read-only 권한 연결 사례](https://williamlam.com/2023/06/custom-vcenter-server-role-using-vsphere-terraform-provider-on-vmware-cloud-on-aws.html)
 - [VM 템플릿 조회](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md)
 - [VM 생성·clone·커스터마이징](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)
 - [Rocky 등 호환 배포판 커스터마이징 방법](https://knowledge.broadcom.com/external/article/313164/configure-a-guest-customization-method-f.html)
