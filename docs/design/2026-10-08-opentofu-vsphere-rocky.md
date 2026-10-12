@@ -33,7 +33,7 @@ tags:
 | vCenter | 인벤토리 조회, 복제·전원·커스터마이징 요청 처리 | `vcenter.example.com` |
 | ESXi | VM의 CPU·메모리·가상 장치 실행 | Cluster에서 배치되는 호스트 |
 | Datastore | VM 디스크와 설정 파일 저장 | `lab-datastore` |
-| Port group | VM의 가상 NIC 연결 | `lab-management` |
+| Port group | VM의 가상 NIC 연결 | 템플릿의 NIC 5개에 연결된 Port group |
 | VMware Tools | 게스트 정보 보고와 초기 설정 처리 | Rocky의 `vmtoolsd` |
 
 **접속 대상은 vCenter다.** Provider의 `vsphere_server`에는 ESXi IP나 게스트 VM IP가 아니라 vCenter의 FQDN 또는 IP를 넣는다. 템플릿 clone은 vCenter가 필요하며, 직접 ESXi 연결에서는 지원하지 않는다. [Provider 연결 설정](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md), [VM clone 조건](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)
@@ -228,7 +228,7 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 
 경로: **메뉴 → 인벤토리 → 네트워킹(Networking) 보기 → vCenter → Datacenter → 목적지 Port group → 권한**.
 
-`lab-management`에 `OpenTofu`를 연결하고 **하위 전파를 끈다**. 분산 Port group이라면 해당 Distributed Switch 아래에서 실제 Port group을 선택한다. 네트워크 연결을 허용하는 절차이지 Switch·VLAN 구성을 바꾸는 권한을 주는 절차는 아니다.
+템플릿의 NIC 5개가 사용하는 **각 Port group**에 `OpenTofu`를 연결하고 **하위 전파를 끈다**. 분산 Port group이라면 해당 Distributed Switch 아래에서 실제 Port group을 선택한다. 네트워크 연결을 허용하는 절차이지 Switch·VLAN 구성을 바꾸는 권한을 주는 절차는 아니다.
 
 **⑤ vCenter 최상위 객체**
 
@@ -334,7 +334,7 @@ ip -br -4 address
 
 `ens38`처럼 번호가 건너뛰는 이름 자체는 문제가 아니다. 복제 코드의 NIC·Port group 선언 순서를 실제 가상 장치 순서에 맞춘다. 게스트 IP 설정도 같은 순서를 따른다. **빈 `network_interface {}`는 IP 미설정이 아니라 DHCP 요청**이므로 IP 없이 사용할 인터페이스와 구분해야 한다. [Provider의 NIC·IP 설정 순서](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#network-interface-settings)
 
-뒤의 5번은 **NIC 1개를 연결하는 최소 학습 예제**다. CPU·메모리와 기본 SCSI 컨트롤러에서 조회한 디스크는 템플릿에서 읽어 사용한다. 여러 NIC를 가진 이 템플릿에 사용할 때는 Port group 연결과 IP 설정 블록을 원본의 장치 순서에 맞게 확장한다.
+뒤의 5번은 **템플릿의 NIC 5개를 순서대로 재사용하는 예제**다. 앞 4개에는 고정 IP를 설정하고, 마지막 `ens38`은 커스터마이징 후 스크립트로 IPv4·IPv6를 끄고 UP 상태를 유지한다. CPU·메모리와 기본 SCSI 컨트롤러에서 조회한 디스크도 템플릿 값을 사용한다.
 
 </div>
 
@@ -355,59 +355,14 @@ vmware-toolbox-cmd config get deployPkg enable-custom-scripts
 
 **저장된 커스터마이징 규격을 만드는 작업과, 복제할 때 `customize`로 값을 전달하는 작업은 다르다.** 여기서는 별도의 규격을 미리 만들지 않고 OpenTofu 코드에서 호스트명·IP·공개키 등록 스크립트를 함께 전달한다.
 
-<details class="analysis-toggle" markdown="1">
-<summary>OpenTofu 코드에 공개키 파일 경로와 등록 스크립트 넣기</summary>
+5번의 `guest-init.sh.tftpl`이 공개키 등록과 provider uplink 초기화를 함께 처리한다. 코드를 두 군데에 복사하지 않고 `main.tf`의 `templatefile()`로 한 번 읽는다.
 
-실행 위치는 Runner의 OpenTofu 프로젝트다. 뒤의 5번에서 프로젝트 파일을 만든 다음 아래 내용을 추가한다. 템플릿 준비 명령과 구분되는 **복제 시 적용할 코드 예시**다.
+- `ssh_public_key_path`에는 **실제로 SSH를 실행할 Runner 계정의 `.pub` 파일** 경로를 넣는다. 개인키는 VM에 전달하지 않는다.
+- 공개키는 Base64로 전달한 뒤 복원한다. Base64는 인코딩이며 암호화가 아니다.
+- `postcustomization` 시점에 실행한다. 같은 키는 중복 등록하지 않고 권한·SELinux 컨텍스트를 맞춘다. `root` 로그인 허용 정책 자체는 바꾸지 않는다.
+- 테스트 Runner와 실제 Runner가 다른 키를 사용하면 공개키 경로만 바꾼다. **키가 바뀔 때마다 템플릿을 다시 만들 필요는 없다.**
 
-`variables.tf`에 공개키 파일 경로를 선언한다.
-
-```hcl title="variables.tf — 추가"
-variable "ssh_public_key_path" {
-  type        = string
-  description = "VM에 등록할 Runner의 SSH 공개키 파일 경로"
-}
-```
-
-`lab.tfvars`에는 실제로 SSH를 실행할 계정의 `.pub` 파일 경로를 넣는다. 다음 경로는 예시이며 Runner의 키 위치에 맞게 바꾼다. 개인키는 VM에 전달하지 않는다.
-
-```hcl title="lab.tfvars — 추가"
-ssh_public_key_path = "/var/lib/gitea-runner/.ssh/id_ed25519.pub"
-```
-
-`main.tf`의 기존 `clone → customize → linux_options`를 다음처럼 확장한다. 기존 NIC·IP·게이트웨이 설정은 그대로 두고, 새로운 `linux_options` 블록을 중복 추가하지 않는다.
-
-```hcl title="main.tf — 기존 linux_options 교체"
-linux_options {
-  host_name = each.key
-  domain    = var.domain
-
-  script_text = <<-SCRIPT
-    #!/bin/sh
-    set -eu
-    [ "$1" = "postcustomization" ] || exit 0
-
-    install -d -m 700 /root/.ssh
-    touch /root/.ssh/authorized_keys
-    key="$(printf '%s' '${base64encode(trimspace(file(pathexpand(var.ssh_public_key_path))))}' | base64 -d)"
-    grep -qxF -- "$key" /root/.ssh/authorized_keys || printf '%s\n' "$key" >> /root/.ssh/authorized_keys
-    chmod 600 /root/.ssh/authorized_keys
-    chown root:root /root/.ssh /root/.ssh/authorized_keys
-    restorecon -R /root/.ssh
-  SCRIPT
-}
-```
-
-- `file(...)`은 OpenTofu 실행 서버에서 공개키 내용을 읽는다.
-- Base64는 긴 키를 스크립트에 전달하기 위한 인코딩이며 암호화가 아니다. VM 안에서 원래 내용으로 복원한다.
-- `postcustomization` 시점에만 등록하고, 같은 키가 있으면 중복 추가하지 않는다.
-- 디렉터리·파일 권한과 SELinux 컨텍스트를 맞춘다. 이 스크립트는 `root` 로그인 설정 자체는 바꾸지 않는다.
-
-테스트 Runner와 실제 Runner가 다른 키를 사용하면 복제 시 해당 Runner의 공개키 경로만 바꾼다. 이 방식이라면 **Runner가 바뀔 때마다 템플릿을 다시 만들 필요가 없다.**
-
-처음에는 VM 한 대로 IP·호스트명 설정과 공개키 접속을 확인한 뒤 여러 대로 늘린다. vCenter·Tools·Rocky의 게스트 커스터마이징 호환성과 실제 SSH 실행 계정의 키 선택이 맞아야 한다. `[확인 필요]` 첫 복제 VM의 스크립트 실행·SSH 접속 결과.
-
-</details>
+처음에는 VM 한 대로 IP·호스트명·uplink 상태·SSH 접속을 확인한 뒤 여러 대로 늘린다. `[확인 필요]` 이 다중 NIC 예제의 실제 게스트 초기화·SSH 접속 결과. 이미 복제에 성공한 기존 코드와는 구분한다.
 
 </div>
 
@@ -415,7 +370,7 @@ linux_options {
 
 <div class="section-body" markdown="1">
 
-현재는 아직 원본 VM 상태다. 공개키 자동 등록을 선택했다면 4-2의 실행 허용까지 마친 뒤 다음 순서로 전환한다.
+이 예제는 공개키 등록·uplink 초기화 스크립트를 사용한다. 원본 VM에서 4-2의 실행 허용까지 마친 뒤 다음 순서로 전환한다.
 
 1. **메뉴 → 인벤토리 → VM 및 템플릿(VMs and Templates)** 보기에서 원본 VM을 선택한다.
 2. **요약(Summary)**에서 VMware Tools 실행 상태를 확인한다. IP 미할당 상태라면 게스트 IP가 비어 있는 것은 준비 실패가 아니다.
@@ -443,20 +398,35 @@ mkdir -p ~/opentofu-learning/vmware-lab
 cd ~/opentofu-learning/vmware-lab
 ```
 
-아래 여섯 파일을 같은 디렉터리에 작성한다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
+아래 일곱 파일을 같은 디렉터리에 작성한다. `.tf` 파일 5개, `lab.tfvars`, `guest-init.sh.tftpl`이다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
 
-**VM 사양은 템플릿을 재사용하고, VM마다 이름·IP만 지정한다.** CPU·메모리·디스크 값을 각 VM에 반복해서 적지 않는다. 이름은 `vms`의 key이고, 고정 IP는 해당 항목의 `ipv4_address`다.
+**VM 사양·NIC 연결은 템플릿을 재사용하고, VM마다 이름·IP 4개만 지정한다.** CPU·메모리·디스크 값을 각 VM에 반복해서 적지 않는다. 이름은 `vms`의 key이고, 고정 IP는 `ipv4_addresses`의 순서 있는 목록이다.
 
 | 설정 | 값을 가져오는 곳 |
 | --- | --- |
 | CPU 수·소켓당 코어 수 | 템플릿의 `num_cpus`, `num_cores_per_socket` |
 | 메모리 | 템플릿의 `memory` |
 | 디스크 크기·배치·프로비저닝 | 조회한 템플릿의 `disks` 목록 |
-| 호스트명·고정 IP | `vms`의 이름과 `ipv4_address` |
+| NIC 수·순서·Port group·adapter type | 템플릿의 `network_interfaces` 목록 |
+| 호스트명·고정 IP 4개 | `vms`의 이름과 `ipv4_addresses` |
+| provider uplink | `provider_uplink_interface`의 NIC, IP 없이 UP |
 | IPv4 prefix | 공통 변수 `ipv4_prefix`, 기본값 `24` |
 | 중첩 가상화 | 공통 변수 `nested_hv`, 기본값 `false` |
 
 이 방식은 위의 사양을 **조회한 값으로 명시하는 것**이다. OpenTofu의 사양 설정을 생략하면 템플릿 값을 모두 자동 상속한다는 뜻은 아니다. [템플릿에서 읽을 수 있는 속성](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md#attribute-reference)
+
+| 템플릿의 NIC 순서 | 게스트 이름 예시 | 용도 | 복제 VM의 설정 |
+| --- | --- | --- | --- |
+| 1 | `ens33` | 관리·API | `ipv4_addresses[0]`, 기본 게이트웨이 |
+| 2 | `ens34` | 모니터링 | `ipv4_addresses[1]` |
+| 3 | `ens35` | Ceph public | `ipv4_addresses[2]` |
+| 4 | `ens36` | Ceph cluster | `ipv4_addresses[3]` |
+| 5 | `ens38` | provider uplink | 초기화 스크립트로 IPv4·IPv6 비활성화, UP |
+
+NIC 4개에 provider uplink까지 **총 5개**다. HCL의 매핑 기준은 `ens33` 같은 이름이 아니라 **템플릿 장치 순서**다. 복제 VM에서도 같은 이름으로 나타나는지 확인한다. 템플릿의 MAC 주소는 복사하지 않는다.
+
+!!! warning "IP 없는 uplink도 VMware의 초기 커스터마이징은 DHCP로 처리"
+    마지막 빈 `network_interface {}`는 DHCP 요청이다. 이 API에는 IP 없는 NIC 설정이 없어, `postcustomization` 스크립트로 최종 상태를 맞춘다. 스크립트 실행 전 DHCP를 시도할 수 있으므로 provider Port group에 DHCP가 있다면 임시 주소를 받을 수 있다. DHCP 시도 자체를 금지해야 하는 환경에서는 이 예제를 그대로 사용하지 않는다.
 
 **versions.tf — 실행 파일과 Provider의 버전**
 
@@ -510,10 +480,6 @@ variable "datastore_name" {
   type = string
 }
 
-variable "network_name" {
-  type = string
-}
-
 variable "template_path" {
   type = string
 }
@@ -544,17 +510,39 @@ variable "nested_hv" {
   default = false
 }
 
+variable "ssh_public_key_path" {
+  type        = string
+  description = "Runner의 공개키 파일. 이미 키가 등록된 템플릿이면 빈 문자열"
+  default     = ""
+}
+
+variable "provider_uplink_interface" {
+  type    = string
+  default = "ens38"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_.:-]+$", var.provider_uplink_interface))
+    error_message = "provider uplink의 실제 인터페이스 이름을 지정한다."
+  }
+}
+
 variable "vms" {
   type = map(object({
-    ipv4_address = string
+    ipv4_addresses = list(string)
   }))
 
   validation {
     condition = (
       length(var.vms) > 0 &&
-      length(distinct([for vm in values(var.vms) : vm.ipv4_address])) == length(var.vms)
+      alltrue([for vm in values(var.vms) : length(vm.ipv4_addresses) == 4]) &&
+      alltrue([
+        for ip in flatten([for vm in values(var.vms) : vm.ipv4_addresses]) :
+        can(cidrnetmask("${ip}/32"))
+      ]) &&
+      length(distinct(flatten([for vm in values(var.vms) : vm.ipv4_addresses]))) ==
+      length(flatten([for vm in values(var.vms) : vm.ipv4_addresses]))
     )
-    error_message = "VM 목록은 비어 있으면 안 되며 IP는 중복할 수 없다."
+    error_message = "VM마다 중복되지 않는 유효한 IPv4 주소 4개를 NIC 순서대로 지정한다."
   }
 }
 ```
@@ -575,11 +563,6 @@ data "vsphere_compute_cluster" "cluster" {
 
 data "vsphere_datastore" "storage" {
   name          = var.datastore_name
-  datacenter_id = data.vsphere_datacenter.dc.id
-}
-
-data "vsphere_network" "management" {
-  name          = var.network_name
   datacenter_id = data.vsphere_datacenter.dc.id
 }
 
@@ -604,9 +587,13 @@ resource "vsphere_virtual_machine" "vm" {
   scsi_type            = data.vsphere_virtual_machine.template.scsi_type
   nested_hv_enabled    = var.nested_hv
 
-  network_interface {
-    network_id   = data.vsphere_network.management.id
-    adapter_type = data.vsphere_virtual_machine.template.network_interface_types[0]
+  dynamic "network_interface" {
+    for_each = data.vsphere_virtual_machine.template.network_interfaces
+
+    content {
+      network_id   = network_interface.value.network_id
+      adapter_type = network_interface.value.adapter_type
+    }
   }
 
   dynamic "disk" {
@@ -632,12 +619,27 @@ resource "vsphere_virtual_machine" "vm" {
       linux_options {
         host_name = each.key
         domain    = var.domain
+
+        script_text = templatefile("${path.module}/guest-init.sh.tftpl", {
+          uplink        = var.provider_uplink_interface
+          protected_ips = join(" ", each.value.ipv4_addresses)
+          public_key_b64 = var.ssh_public_key_path == "" ? "" : base64encode(
+            trimspace(file(pathexpand(var.ssh_public_key_path)))
+          )
+        })
       }
 
-      network_interface {
-        ipv4_address = each.value.ipv4_address
-        ipv4_netmask = var.ipv4_prefix
+      dynamic "network_interface" {
+        for_each = each.value.ipv4_addresses
+
+        content {
+          ipv4_address = network_interface.value
+          ipv4_netmask = var.ipv4_prefix
+        }
       }
+
+      # 5번째 NIC는 DHCP로 처리된다. 후처리로 IP 없는 UP 상태를 만든다.
+      network_interface {}
 
       ipv4_gateway    = var.ipv4_gateway
       dns_server_list = var.dns_servers
@@ -645,6 +647,13 @@ resource "vsphere_virtual_machine" "vm" {
   }
 
   wait_for_guest_net_timeout = 10
+
+  lifecycle {
+    precondition {
+      condition     = length(data.vsphere_virtual_machine.template.network_interfaces) == 5
+      error_message = "고정 IP용 NIC 4개와 provider uplink 1개가 있는 템플릿을 사용한다."
+    }
+  }
 }
 ```
 
@@ -654,17 +663,88 @@ resource "vsphere_virtual_machine" "vm" {
 - `num_cpus`, `num_cores_per_socket`, `memory`는 조회한 템플릿 사양을 사용한다.
 - `dynamic "disk"`는 조회한 디스크마다 `disk` 블록을 만들어 크기·SCSI 장치 번호·프로비저닝을 맞춘다. OS 디스크 하나뿐이면 블록도 하나다.
 - `cluster.resource_pool_id`로 VM이 사용할 자원 pool을 선택한다.
-- VM 바깥 `network_interface`는 **가상 NIC를 Port group에 연결**한다.
-- `customize` 안의 `network_interface`는 **Rocky 내부 IP를 설정**한다. 여러 NIC를 쓰면 선언 순서를 맞춰야 한다.
+- 바깥 `dynamic "network_interface"`는 **템플릿의 NIC 5개를 같은 순서·Port group·adapter type으로 연결**한다. `network_name`을 따로 입력하지 않는다.
+- `customize` 안의 `dynamic "network_interface"`는 **앞 4개 NIC의 Rocky 내부 IP를 목록 순서대로 설정**한다. 마지막 빈 블록은 uplink에 대응한다.
+- `templatefile()`은 아래 초기화 파일에 공개키·uplink 이름·보호할 고정 IP를 넣어 VMware Tools에 전달한다.
 - `firmware`, `guest_id`, `scsi_type`는 템플릿 값을 따른다. EFI 템플릿을 BIOS로 만드는 실수를 피한다.
 - `linked_clone = false`는 Full Clone이다. 복제 후 디스크가 원본 snapshot에 의존하지 않도록 시작한다.
 - clone·customization·guest network timeout은 서로 다른 대기 단계이며 단위는 분이다.
 
-디스크 예제는 템플릿의 SCSI 디스크가 기본 컨트롤러 하나에 있는 구성을 기준으로 한다. 컨트롤러가 여러 개면 data source의 조회 범위와 리소스의 컨트롤러 개수도 맞춰야 한다. NIC는 위 코드에서 한 개만 연결하므로 다중 NIC 템플릿에 그대로 적용하지 않는다.
+디스크 예제는 템플릿의 SCSI 디스크가 기본 컨트롤러 하나에 있는 구성을 기준으로 한다. 컨트롤러가 여러 개면 data source의 조회 범위와 리소스의 컨트롤러 개수도 맞춰야 한다. NIC 예제는 5개로 제한한다. NIC 하나만 선언하면 템플릿에 있던 나머지 NIC가 그대로 보존된다고 생각하면 안 된다. [복제 후 NIC 수를 맞추는 Provider 코드](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/vsphere/internal/virtualdevice/virtual_machine_network_interface_subresource.go#L473-L577)
 
-`customize`는 유지한다. 템플릿 사양을 재사용하는 것과, 복제 VM의 호스트명·IP를 새로 설정하는 것은 별개다. 공개키 자동 등록은 4-2의 `script_text`를 기존 `linux_options`에 추가한다.
+`customize`는 유지한다. 템플릿 사양을 재사용하는 것과, 복제 VM의 호스트명·IP를 새로 설정하는 것은 별개다. 관리 NIC에만 기본 게이트웨이를 두고 다른 내부망 NIC에는 추가 게이트웨이를 넣지 않는다.
 
 조회할 템플릿 속성은 [VM data source](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md), 복제와 커스터마이징 옵션은 [VM resource](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)를 참고한다.
+
+**guest-init.sh.tftpl — 공개키 등록과 IP 없는 uplink 초기화**
+
+이 파일은 Runner에서 직접 실행하지 않는다. `templatefile()`로 읽어 `script_text`에 넣고 **복제 VM의 VMware Tools가 실행**한다. 마지막 NIC 이름이 잘못됐거나 앞 4개 고정 IP가 그 NIC에 붙어 있으면 중단한다. 다른 NIC나 NetworkManager 서비스 전체는 재시작하지 않는다.
+
+<details class="analysis-toggle" markdown="1">
+<summary>guest-init.sh.tftpl 전체 코드와 확인 방법</summary>
+
+```bash title="guest-init.sh.tftpl"
+#!/bin/sh
+set -eu
+[ "$${1:-}" = "postcustomization" ] || exit 0
+exec >> /var/log/opentofu-guest-init.log 2>&1
+
+uplink='${uplink}'
+profile='opentofu-provider-uplink'
+ip link show dev "$uplink" >/dev/null
+
+addresses="$(ip -o -4 addr show dev "$uplink" | awk '{print $4}' | cut -d/ -f1)"
+for ip in ${protected_ips}; do
+  if printf '%s\n' "$addresses" | grep -qxF -- "$ip"; then
+    echo "Refusing to change a static-IP interface: $uplink"
+    exit 1
+  fi
+done
+
+# 대상 NIC에 연결된 기존 프로필의 자동 연결만 중지한다.
+for uuid in $(nmcli -g UUID connection show); do
+  device="$(nmcli -g connection.interface-name connection show uuid "$uuid")"
+  if [ "$device" = "$uplink" ]; then
+    nmcli connection modify uuid "$uuid" connection.autoconnect no
+  fi
+done
+
+if ! nmcli connection show "$profile" >/dev/null 2>&1; then
+  nmcli connection add type ethernet con-name "$profile" ifname "$uplink" \
+    ipv4.method disabled ipv6.method disabled
+fi
+nmcli connection modify "$profile" connection.interface-name "$uplink" \
+  connection.autoconnect yes connection.autoconnect-priority 100 \
+  ipv4.method disabled ipv6.method disabled
+nmcli connection up "$profile" ifname "$uplink"
+
+key="$(printf '%s' '${public_key_b64}' | base64 -d)"
+if [ -n "$key" ]; then
+  install -d -m 700 /root/.ssh
+  touch /root/.ssh/authorized_keys
+  grep -qxF -- "$key" /root/.ssh/authorized_keys || \
+    printf '%s\n' "$key" >> /root/.ssh/authorized_keys
+  chmod 600 /root/.ssh/authorized_keys
+  chown root:root /root/.ssh /root/.ssh/authorized_keys
+  restorecon -R /root/.ssh
+fi
+echo 'guest-init complete'
+```
+
+`ipv4.method disabled`와 `ipv6.method disabled`는 해당 프로필의 IPv4·IPv6를 비활성화한다. NIC는 연결 상태로 유지한다. [NetworkManager 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
+
+`$${1:-}`의 이중 `$`는 OpenTofu 템플릿 처리 후 셸의 `${1:-}`로 남기기 위한 표기다. `protected_ips`에는 앞 4개 NIC의 고정 IP만 들어간다.
+
+VM 안에서 로그 끝의 `guest-init complete`를 확인한다. `ens38`에 주소가 없고 link가 UP인지 함께 확인한다. 스크립트의 완료 로그만으로 나머지 NIC 설정까지 성공했다고 판단하지 않는다.
+
+```bash
+cat /var/log/opentofu-guest-init.log
+ip -br link show dev ens38
+ip -br address show dev ens38
+nmcli -g ipv4.method,ipv6.method connection show opentofu-provider-uplink
+```
+
+</details>
 
 **outputs.tf — 다음 단계에서 사용할 정보**
 
@@ -672,22 +752,24 @@ resource "vsphere_virtual_machine" "vm" {
 output "vm_info" {
   value = {
     for name, vm in vsphere_virtual_machine.vm : name => {
-      id            = vm.id
-      configured_ip = var.vms[name].ipv4_address
-      reported_ip   = vm.default_ip_address
+      id             = vm.id
+      configured_ip  = var.vms[name].ipv4_addresses[0]
+      configured_ips = var.vms[name].ipv4_addresses
+      reported_ip    = vm.default_ip_address
+      reported_ips   = vm.guest_ip_addresses
     }
   }
 }
 ```
 
-`configured_ip`는 입력한 값이고 `reported_ip`는 게스트에서 보고된 값이다. 입력값이 출력됐다는 이유만으로 실제 네트워크 설정이 성공했다고 판단하지 않는다.
+`configured_ip`는 입력한 관리 IP, `configured_ips`는 순서대로 넣은 4개 IP다. `reported_ip`·`reported_ips`는 VMware Tools에서 보고한 값이며 배열 순서가 NIC 순서라는 보장은 없다. 입력값이 출력됐다는 이유만으로 실제 네트워크 설정이 성공했다고 판단하지 않는다.
 
 **lab.tfvars — 먼저 VM 한 대**
 
-예제의 이름·문서용 IP를 실제 테스트 환경의 값으로 바꾼다. 공통 prefix는 `24`처럼 넣는다. `255.255.255.0` 문자열을 넣는 자리가 아니다.
+예제의 이름·문서용 IP를 실제 테스트 환경의 값으로 바꾼다. 공개 예제는 서로 겹치지 않는 네트워크 4개를 표현하려고 문서용 대역을 `/25`로 나눴다. 실제 환경이 `/24`라면 `ipv4_prefix = 24`와 실제 주소를 함께 넣는다. `255.255.255.0` 문자열을 넣는 자리가 아니다.
 
 !!! warning "기존 코드에서 바꿀 때는 VM 이름을 유지"
-    `variables.tf`, `main.tf`, `lab.tfvars`를 함께 변경한다. 이미 `deploy-01` 등 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. 변경 전 저장한 계획 파일은 사용하지 않고 새 `tofu plan`으로 삭제·교체 대상을 확인한다.
+    `variables.tf`, `main.tf`, `outputs.tf`, `lab.tfvars`를 함께 변경하고 `guest-init.sh.tftpl`을 추가한다. 이미 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. NIC·커스터마이징 변경으로 VM 교체가 포함될 수 있다. 기존 계획 파일 대신 새 `tofu plan`으로 대상을 확인한다.
 
 ```hcl title="lab.tfvars"
 vcenter_server = "vcenter.example.com"
@@ -695,21 +777,27 @@ vcenter_server = "vcenter.example.com"
 datacenter_name = "Lab-DC"
 cluster_name    = "Lab-Cluster"
 datastore_name  = "lab-datastore"
-network_name    = "lab-management"
 template_path   = "Templates/rocky-9.6-base-v1"
 vm_folder       = "Lab/opentofu"
 
 domain       = "lab.example.com"
 ipv4_gateway = "192.0.2.1"
-ipv4_prefix  = 24
+ipv4_prefix  = 25
 dns_servers  = ["192.0.2.53"]
 
+provider_uplink_interface = "ens38"
+ssh_public_key_path       = "/var/lib/gitea-runner/.ssh/id_ed25519.pub"
+
 vms = {
-  runner01 = { ipv4_address = "192.0.2.101" }
+  runner01 = {
+    ipv4_addresses = ["192.0.2.101", "198.51.100.101", "203.0.113.101", "203.0.113.201"]
+  }
 }
 ```
 
 CPU·메모리·디스크 입력은 필요 없다. 예를 들어 템플릿이 16 vCPU·32GiB 메모리·OS 디스크 100GiB라면 같은 사양으로 복제한다. 이 수치는 설명용이며 실제 값은 `tofu plan`에서 조회 결과를 확인한다. 원하는 검증 환경에 필요한 사양은 템플릿에서 먼저 준비한다.
+
+`ssh_public_key_path`는 예제 경로를 그대로 쓰지 말고 실제 `.pub` 파일로 바꾼다. OpenTofu 실행 계정이 그 파일을 읽을 수 있어야 한다. 이미 접속용 공개키가 들어 있는 템플릿이라면 빈 문자열로 두어 키 등록만 생략할 수 있다. 이 경우에도 uplink 초기화는 실행한다.
 
 ## 6. 인증과 조회부터 시작
 
@@ -753,9 +841,14 @@ hostnamectl
 ip -br address
 ip route
 systemctl is-active vmtoolsd
+cat /var/log/opentofu-guest-init.log
+ip -br link show dev ens38
+ip -br address show dev ens38
 ```
 
-Provider의 완료 대기는 SSH 서버·Nexus·OpenStack 서비스의 준비 완료까지 보장하지 않는다. 다음 설치 단계에서는 해당 서비스의 준비 여부를 따로 확인한다.
+앞 4개 NIC가 입력한 주소를 순서대로 받았는지, 기본 경로가 관리 NIC에만 있는지 확인한다. 마지막 `ens38`은 UP이면서 IPv4·IPv6 주소가 없어야 한다. `guest-init complete` 로그도 확인한다. VMware의 장치 순서와 게스트 인터페이스 이름이 달라졌으면 실제 이름을 확인한 뒤 코드를 맞춘다.
+
+Provider의 완료 대기는 초기화 스크립트·SSH 서버·Nexus·OpenStack 서비스의 준비 완료까지 보장하지 않는다. 다음 설치 단계에서는 해당 서비스의 준비 여부를 따로 확인한다.
 
 ## 7. 같은 템플릿으로 VM 여러 대 생성
 
@@ -763,14 +856,22 @@ VM 한 대가 정상 복제된 뒤 `lab.tfvars`의 `vms`에 항목을 추가한�
 
 ```hcl title="lab.tfvars — vms 부분 교체"
 vms = {
-  runner01 = { ipv4_address = "192.0.2.101" }
-  runner02 = { ipv4_address = "192.0.2.102" }
-  runner03 = { ipv4_address = "192.0.2.103" }
-  runner04 = { ipv4_address = "192.0.2.104" }
+  runner01 = {
+    ipv4_addresses = ["192.0.2.101", "198.51.100.101", "203.0.113.101", "203.0.113.201"]
+  }
+  runner02 = {
+    ipv4_addresses = ["192.0.2.102", "198.51.100.102", "203.0.113.102", "203.0.113.202"]
+  }
+  runner03 = {
+    ipv4_addresses = ["192.0.2.103", "198.51.100.103", "203.0.113.103", "203.0.113.203"]
+  }
+  runner04 = {
+    ipv4_addresses = ["192.0.2.104", "198.51.100.104", "203.0.113.104", "203.0.113.204"]
+  }
 }
 ```
 
-VM 이름만으로 역할이 자동 지정되지는 않는다. 첫 번째 Deploy Node 등 역할 구분은 이후 배포 단계에서 이름을 기준으로 연결한다. 이 예제는 모든 VM의 사양을 동일하게 유지한다.
+VM마다 각 네트워크 주소의 마지막 자리만 바꾼다. 모든 VM에 NIC 5개가 붙고, 마지막 provider uplink에는 IP를 넣지 않는다. VM 이름만으로 역할이 자동 지정되지는 않는다. 첫 번째 Deploy Node 등 역할 구분은 이후 배포 단계에서 이름을 기준으로 연결한다. 이 예제는 모든 VM의 사양을 동일하게 유지한다.
 
 ```bash
 tofu plan -var-file=lab.tfvars -out=expand.tfplan
@@ -804,13 +905,13 @@ OpenTofu가 IP를 지정한다고 DHCP·IPAM에서 그 IP를 예약해 주지는
 <details class="analysis-toggle" markdown="1">
 <summary>고정 IP 대신 DHCP를 쓰려면?</summary>
 
-`clone.customize`의 NIC 블록을 비우고 `ipv4_gateway`를 제거한다.
+관리·내부망 NIC까지 DHCP로 바꾸려면 해당 `clone.customize` NIC 블록을 비우고 고정 IP 관련 설정을 재구성해야 한다. 다음은 NIC **한 개의 설정을 표현하는 조각**이며 앞의 다중 NIC 전체 코드를 교체하는 예제가 아니다.
 
 ```hcl title="DHCP용 customize NIC 부분"
 network_interface {}
 ```
 
-바깥의 Port group 연결 블록은 유지한다. IP가 정해지는 주체만 DHCP로 바뀌는 것이다. 변수에서 고정 IP를 제거하면 `vms` 타입·중복 IP 검증·`configured_ip` output도 함께 변경해야 한다. 뒤의 Ansible에는 VMware Tools에서 보고한 주소나 별도 DHCP 조회 결과를 전달한다.
+바깥의 Port group 연결 블록은 유지한다. IP가 정해지는 주체만 DHCP로 바뀌는 것이다. 변수에서 고정 IP를 제거하면 `vms` 타입·중복 IP 검증·output·초기화 스크립트의 고정 IP 보호 부분도 함께 변경해야 한다. 뒤의 Ansible에는 VMware Tools에서 보고한 주소나 별도 DHCP 조회 결과를 전달한다.
 
 DHCP 서버가 없는 네트워크에서는 이 방식만으로 주소가 생기지 않는다. [커스터마이징 네트워크 옵션](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#network-interface-settings)
 
@@ -826,7 +927,7 @@ tofu plan -var-file=lab.tfvars
 
 변경이 없다면 계획에도 추가 작업이 없어야 한다. 이 예제는 매번 템플릿 사양을 조회하므로 **같은 템플릿의 CPU·메모리·디스크를 바꾸면 기존 VM의 계획에도 영향**을 줄 수 있다. IP·템플릿 경로 등 clone 설정 변경은 VM 교체를 유발할 수 있으므로 `tofu show`에서 대상을 확인한다. 복제 기준을 유지하려면 `base-v1`, `base-v2`처럼 템플릿을 구분한다.
 
-VM별 CPU·메모리·디스크 입력을 없앴으므로 예전 `cpus`, `memory_mb`, `disk_gib` 값은 `lab.tfvars`에서 제거한다. 이후 별도로 디스크를 확장하더라도 Rocky의 partition·LVM·파일시스템 확장은 따로 필요할 수 있다.
+VM별 CPU·메모리·디스크 입력을 없앴으므로 예전 `cpus`, `memory_mb`, `disk_gib` 값은 `lab.tfvars`에서 제거한다. NIC 연결은 템플릿에서 읽으므로 `network_name`도 제거한다. 예전의 단일 `ipv4_address`는 4개 주소 목록인 `ipv4_addresses`로 바꾼다. 이후 별도로 디스크를 확장하더라도 Rocky의 partition·LVM·파일시스템 확장은 따로 필요할 수 있다.
 
 **중간에 실패**
 
@@ -883,6 +984,8 @@ unset VSPHERE_USER VSPHERE_PASSWORD
 | 복제는 됐지만 OS 부팅 실패 | EFI/BIOS·컨트롤러·디스크 | VM 콘솔, 템플릿 설정 |
 | Customization timeout | Rocky 지원 조건·Tools·Perl·네트워크 초기화 충돌 | vCenter Events, 게스트 Tools 로그 |
 | Guest network timeout | 실제 IP·게이트웨이·Tools 보고 | VM 콘솔, Summary, nmcli |
+| 복제 후 NIC가 하나만 남음 | 리소스 바깥 NIC 선언이 한 개뿐인지 | `main.tf`의 dynamic NIC, 템플릿 NIC 목록 |
+| uplink에 주소가 남아 있음 | 초기화 스크립트 허용·실행·NIC 이름 | `opentofu-guest-init.log`, `ens38` 주소·프로필 |
 | 디스크 크기 오류 | 원본보다 작은 디스크 또는 다른 장치 구조 | 템플릿 Edit Settings |
 | SSH 접속 실패 | 라우팅·방화벽·sshd·계정 공개키 | VM 콘솔과 SSH 상세 로그 |
 
@@ -933,5 +1036,7 @@ tofu output -json vm_info > vm-info.json
 - [VDS Read-only 권한 연결 사례](https://williamlam.com/2023/06/custom-vcenter-server-role-using-vsphere-terraform-provider-on-vmware-cloud-on-aws.html)
 - [VM 템플릿 조회](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md)
 - [VM 생성·clone·커스터마이징](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)
+- [VMware Tools 커스터마이징 스크립트 허용·실행 시점](https://knowledge.broadcom.com/external/article/313048/setting-the-customization-script-for-vir.html)
+- [NetworkManager의 IPv4·IPv6 비활성화 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
 - [Rocky 등 호환 배포판 커스터마이징 방법](https://knowledge.broadcom.com/external/article/313164/configure-a-guest-customization-method-f.html)
 - [VMware open-vm-tools](https://github.com/vmware/open-vm-tools)
