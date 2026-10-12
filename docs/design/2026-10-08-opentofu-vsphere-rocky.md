@@ -1010,6 +1010,8 @@ IP 대기 timeout만 늘려서 해결하려고 하지 않는다. NIC 연결 문�
 
 ## 10. Ansible·릴리스 검증으로 연결
 
+이어지는 [OpenTofu 입문 가이드 - 3](../concepts/2026-10-12-opentofu-ansible-deploy.md)에서는 첫 VM의 TAR 다운로드·해제, deploy.sh 실행, 컨테이너 기동 후 설정 파일 전달, Ansible 실행을 연결한다.
+
 VM 생성 이후 결과를 JSON으로 내보내면 다음 단계가 읽기 쉽다.
 
 ```bash

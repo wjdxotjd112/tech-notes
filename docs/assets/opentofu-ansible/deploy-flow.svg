@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="650" viewBox="0 0 560 650" role="img" aria-labelledby="title desc">
+  <title id="title">OpenTofu에서 TAR 설치와 Ansible 실행으로 이어지는 관계</title>
+  <desc id="desc">Runner는 생성된 모든 VM의 SSH 준비를 확인한다. 첫 VM runner01은 사내 Nexus에서 TAR를 다운로드하고 deploy.sh로 Private Nexus와 배포 컨테이너를 준비한다. Runner가 설정 파일을 보낸 뒤 배포 컨테이너가 클러스터 VM에 Ansible을 실행한다.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#2563eb"/></marker></defs>
+  <rect x="5" y="5" width="550" height="640" rx="12" fill="#eff5ff"/>
+  <g font-family="Pretendard, Noto Sans CJK KR, sans-serif" text-anchor="middle" fill="#1e293b">
+    <rect x="35" y="28" width="490" height="75" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="280" y="59" font-size="23" font-weight="600">Runner · OpenTofu</text><text x="280" y="87" font-size="20">모든 VM의 SSH 준비 확인</text>
+    <path d="M140 103V179" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><text x="155" y="133" font-size="18" text-anchor="start">준비 명령</text><text x="155" y="157" font-size="18" text-anchor="start">설정 파일 전송</text>
+    <rect x="320" y="172" width="205" height="75" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="422" y="204" font-size="22" font-weight="600">사내 Nexus</text><text x="422" y="231" font-size="20">릴리스 TAR 제공</text>
+    <rect x="35" y="182" width="245" height="104" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="157" y="215" font-size="23" font-weight="600">runner01</text><text x="157" y="243" font-size="20">TAR 다운로드·해제</text><text x="157" y="269" font-size="20">deploy.sh 실행</text>
+    <path d="M320 260H285" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M422 247V260H320" fill="none" stroke="#2563eb" stroke-width="2.5"/><text x="418" y="286" font-size="18">HTTPS 다운로드</text>
+    <path d="M157 286V342" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><text x="305" y="319" font-size="18">첫 VM에서 기동</text>
+    <rect x="35" y="348" width="205" height="92" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="137" y="382" font-size="23" font-weight="600">Private Nexus</text><text x="137" y="411" font-size="20">배포 이미지·Raw</text>
+    <rect x="280" y="348" width="245" height="92" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="402" y="382" font-size="23" font-weight="600">Ansible 컨테이너</text><text x="402" y="411" font-size="20">설정 적용 후 playbook</text>
+    <path d="M157 334H402V343" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M402 440V513" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow)"/><text x="285" y="481" font-size="20">노드 SSH · Ansible</text>
+    <rect x="35" y="520" width="490" height="95" rx="8" fill="white" stroke="#0b1f3a"/>
+    <text x="280" y="555" font-size="23" font-weight="600">클러스터 VM</text><text x="280" y="585" font-size="20">runner01 포함 · Controller / Compute / Ceph</text>
+  </g>
+</svg>
