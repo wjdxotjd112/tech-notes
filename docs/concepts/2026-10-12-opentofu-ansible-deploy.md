@@ -69,7 +69,7 @@ OpenTofu는 셸 명령의 내부 동작까지 선언형으로 관리하지 못�
 <div class="section-body" markdown="1">
 
 - 2편의 VM 생성·NIC·고정 IP 설정을 완료한다. VM 이름은 그대로 유지한다.
-- 2편의 main.tf에 넣은 Runner 공개키가 모든 VM의 `root` 계정에 등록돼 있어야 한다. 이 예제는 키 인증을 사용한다.
+- 2편의 `ssh_public_key` 변수 기본값으로 지정한 Runner 공개키가 모든 VM의 `root` 계정에 등록돼 있어야 한다. 이 예제는 키 인증을 사용한다.
 - Runner에서 VM의 관리 IP로 SSH 연결이 가능해야 한다.
 - `runner01`에서 사내 Nexus 다운로드 주소에 접근할 수 있어야 한다.
 - TAR 해제 공간, Nexus 데이터 공간, containerd 이미지 공간을 확보한다.
@@ -84,7 +84,7 @@ command -v bash scp curl tar sha256sum timeout
 
 OpenTofu의 SSH Provisioner는 명령 실행에도 스크립트를 업로드한다. SSH 서버만 있고 `scp`가 없다면 이 과정에서 실패할 수 있다. [SSH 연결과 SCP 조건](https://opentofu.org/docs/v1.10/language/resources/provisioners/connection/#executing-scripts-using-sshscp)
 
-2편의 main.tf에 직접 넣은 `script_text`는 `/var/log/opentofu-guest-init.log`에 `guest-init complete`를 남긴다. 아래 코드는 이 완료 표시까지 기다린다. VM 초기화를 위한 별도 스크립트 파일은 필요 없다. 다른 초기화 방식을 쓰는 템플릿이라면 그 방식의 준비 완료 조건으로 바꾼다.
+2편의 `guest-init.sh.tftpl`은 main.tf에서 읽어 VMware Tools에 전달한다. VM 안에서 실행을 마치면 `/var/log/opentofu-guest-init.log`에 `guest-init complete`를 남긴다. 아래 코드는 이 완료 표시까지 기다린다. 다른 초기화 방식을 쓰는 템플릿이라면 그 방식의 준비 완료 조건으로 바꾼다.
 
 </div>
 
@@ -228,6 +228,7 @@ Rocky VM이 부팅됐다는 사실과 모든 Ansible 역할의 Rocky 지원은 �
 vmware-lab/
 ├── main.tf                         # 2편의 VM 생성 코드
 ├── variables.tf                    # 2편의 VM 입력값
+├── guest-init.sh.tftpl              # 2편의 공개키·uplink 초기화
 ├── ... 나머지 2편 프로젝트 파일
 ├── deployment-variables.tf          # TAR·Deploy VM·SSH 입력값
 ├── deployment.tf                    # SSH 확인 → 준비 → Ansible 순서
@@ -511,11 +512,11 @@ ansible-playbook -i inventory/inventory.ini main.yml
 
 ## 6. 실행하고 결과 확인하기
 
-`lab.tfvars`에 아래 입력을 추가한다. 실제 Nexus URL과 Runner의 개인키 경로로 바꾼다. `ssh_private_key_path`는 2편 main.tf의 고정 공개키와 짝이 맞는 개인키 파일 경로다. 공개키는 VM에 등록하고, 개인키는 Runner에만 둔다.
+`lab.tfvars`에 아래 입력을 추가한다. 실제 Nexus URL과 Runner의 개인키 경로로 바꾼다. `ssh_private_key_path`는 2편 `ssh_public_key` 변수의 공개키와 짝이 맞는 개인키 파일 경로다. 아래는 root 계정의 키 경로 예시다. OpenTofu 실행 계정이 파일을 읽을 수 있어야 한다. 공개키는 VM에 등록하고, 개인키는 Runner에만 둔다. Runner가 고정이면 같은 개인키 경로를 계속 사용한다.
 
 ```hcl title="lab.tfvars — 배포 입력 추가"
 deploy_vm_name       = "runner01"
-ssh_private_key_path = "/var/lib/gitea-runner/.ssh/id_ed25519"
+ssh_private_key_path = "/root/.ssh/id_ed25519"
 bundle_url          = "https://nexus.example.com/repository/raw-manifest/current/stable/contrabass-engine.tar"
 bundle_dir_name     = "contrabass-engine-deploy"
 

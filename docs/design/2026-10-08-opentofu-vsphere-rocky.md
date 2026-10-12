@@ -21,7 +21,7 @@ tags:
   <p class="editorial-summary-result"><span><strong>환경 확인 → 템플릿 준비 → 코드 작성 → 생성·접속 → 추가·삭제</strong> 순서로 따라간다.</span></p>
 </section>
 
-[OpenTofu 입문 가이드 - 1](2026-10-08-opentofu-basics.md)에서 익힌 개념을 VMware VM 생성 실습으로 연결한다. 이 글은 **vCenter가 관리하는 vSphere 환경, Rocky Linux 9.6 일반 VM 템플릿, 고정 IPv4**를 기준으로 한다. vSphere Client의 메뉴 이름은 버전·언어에 따라 조금 다르다.
+[OpenTofu 입문 가이드 - 1](2026-10-08-opentofu-basics.md)에서 익힌 개념을 VMware VM 생성 실습으로 연결한다. 이 글은 **vCenter가 관리하는 독립 ESXi Host, Rocky Linux 9.6 일반 VM 템플릿, 고정 IPv4**를 기준으로 한다. VMware Cluster는 사용하지 않는다. vSphere Client의 메뉴 이름은 버전·언어에 따라 조금 다르다.
 
 ## 1. 어떤 서버에 무엇을 요청하는가
 
@@ -31,7 +31,7 @@ tags:
 | --- | --- | --- |
 | OpenTofu 실행 서버 | 설정을 읽고 Provider를 실행 | 관리용 Linux 서버 또는 Runner |
 | vCenter | 인벤토리 조회, 복제·전원·커스터마이징 요청 처리 | `vcenter.example.com` |
-| ESXi | VM의 CPU·메모리·가상 장치 실행 | Cluster에서 배치되는 호스트 |
+| ESXi | VM의 CPU·메모리·가상 장치 실행 | `esxi-01.example.com`을 직접 배치 대상으로 지정 |
 | Datastore | VM 디스크와 설정 파일 저장 | `lab-datastore` |
 | Port group | VM의 가상 NIC 연결 | 템플릿의 NIC 5개에 연결된 Port group |
 | VMware Tools | 게스트 정보 보고와 초기 설정 처리 | Rocky의 `vmtoolsd` |
@@ -41,7 +41,7 @@ tags:
 처리 순서는 다음과 같다.
 
 1. Provider가 HTTPS로 vCenter에 로그인한다.
-2. Datacenter·Cluster·Datastore·Port group·템플릿을 이름으로 조회해 ID를 얻는다.
+2. Datacenter·ESXi Host·Datastore·템플릿을 조회해 ID와 NIC의 Port group 연결을 얻는다.
 3. 템플릿 UUID와 배치·사양을 포함한 복제 요청을 보낸다.
 4. vCenter가 작업을 실행하고 VM을 부팅한다.
 5. 게스트 커스터마이징이 VMware Tools를 통해 호스트명·IP 등을 적용한다.
@@ -57,8 +57,8 @@ Provider가 가상화 관리 API를 호출하는 것과 Ansible이 SSH로 게스
 | --- | --- | --- |
 | vCenter 주소·버전 | 로그인 주소, vCenter의 Summary·About | FQDN 또는 IP. Provider에는 `/ui/`·`/sdk`를 넣지 않음 |
 | Datacenter | Hosts and Clusters의 상위 객체 | `Lab-DC` |
-| Cluster | Datacenter 아래 ESXi가 모인 객체 | `Lab-Cluster` |
-| Resource Pool | Cluster·Host 아래 자원 할당 계층 | 예제는 Cluster의 기본 pool 사용 |
+| ESXi Host | Hosts and Clusters → Datacenter → 대상 Host | vCenter에 등록된 이름, 예: `esxi-01.example.com` |
+| Resource Pool | 독립 Host의 기본 자원 풀 | `vsphere_host`에서 Host의 기본 pool ID 조회 |
 | Datastore | Storage → 대상 datastore | `lab-datastore`, 여유 공간 확인 |
 | Port group | Networking → 대상 네트워크 | `lab-management`, VLAN·연결 가능한 ESXi 확인 |
 | 원본 템플릿 | VMs and Templates → Templates 폴더 | `Templates/rocky-9.6-base-v1` |
@@ -66,7 +66,7 @@ Provider가 가상화 관리 API를 호출하는 것과 Ansible이 SSH로 게스
 
 **VM 폴더와 datastore 폴더는 다르다.** 여기서 `Lab/opentofu`는 vCenter 인벤토리의 VM 폴더다. datastore 브라우저의 파일 경로를 입력하는 곳이 아니다. 폴더는 미리 만들고 템플릿과 중복되지 않는 이름을 사용한다.
 
-예제는 Cluster가 있는 환경이다. Datacenter 아래 ESXi 하나만 있고 Cluster가 없다면 `vsphere_compute_cluster` 조회를 그대로 사용할 수 없다. 해당 Host의 Resource Pool을 조회하는 코드로 바꿔야 한다. [Cluster data source](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/compute_cluster.md)
+예제는 Cluster 없이 Datacenter 아래의 ESXi Host에 VM을 배치한다. `resource_pool_id`에는 Host의 기본 자원 풀 ID를, `host_system_id`에는 같은 Host의 ID를 넣는다. **Provider 접속 대상은 계속 vCenter**다. ESXi로 직접 API 연결을 바꾸는 것이 아니다. 선택한 Host가 템플릿·목적지 datastore와 NIC의 모든 Port group을 사용할 수 있어야 한다. [Host data source](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/host.md)
 
 <details class="analysis-toggle" markdown="1">
 <summary>vCenter 연결과 VM 연결을 따로 확인하는 방법</summary>
@@ -126,16 +126,16 @@ vCenter API 계정과 Rocky SSH 계정을 구분한다.
 | 권한을 연결할 대상 | 연결하는 이유 | 사용할 Role | 하위 항목으로 전파 |
 | --- | --- | --- | --- |
 | 원본 템플릿과 VM을 만들 폴더 | 원본 복제, 목적지 VM 생성·관리 | `OpenTofu` | 폴더는 켬. 원본 템플릿 하나에 직접 연결하면 끔 |
-| 목적지 Cluster 또는 Resource Pool | VM에 CPU·메모리 자원을 배정 | `OpenTofu` | Cluster의 기본 pool을 쓰면 켬 |
+| 목적지 ESXi Host | Host 조회, 기본 Resource Pool에 VM 배치 | `OpenTofu` | 기본 pool·하위 VM에 필요한 권한이 적용되도록 켬 |
 | 목적지 Datastore | 복제한 디스크를 저장 | `OpenTofu` | 대상 datastore에 직접 연결, 끔 |
 | 목적지 Port group | 가상 NIC를 네트워크에 연결 | `OpenTofu` | 대상 네트워크에 직접 연결, 끔 |
 | vCenter 최상위 객체 | 스토리지 정책 조회 | `OpenTofu` | 통합 Role의 VM 권한이 확산되지 않도록 끔 |
 | 분산 스위치(VDS), 분산 Port group을 사용할 때 | Port group이 참조하는 스위치 설정 조회 | 기본 제공 `Read-only` | 스위치 자체에 연결, 끔 |
 
-기본 연결 대상은 다섯 종류이며, **분산 Port group을 사용하면 해당 VDS의 조회 권한 연결이 추가**된다. 템플릿과 목적지 폴더가 분리돼 있으면 첫 번째 종류에서 두 곳에 연결한다. 이 글의 코드는 Cluster의 기본 Resource Pool을 사용하므로 **ESXi Host에 추가 관리 권한을 주는 절차는 넣지 않는다.**
+기본 연결 대상은 다섯 종류이며, **분산 Port group을 사용하면 해당 VDS의 조회 권한 연결이 추가**된다. 템플릿과 목적지 폴더가 분리돼 있으면 첫 번째 종류에서 두 곳에 연결한다. 이 글은 Cluster 대신 **목적지 ESXi Host와 그 기본 Resource Pool**을 사용한다. Host의 시스템 설정을 변경하는 권한까지 추가하는 것은 아니다.
 
 !!! warning "Role을 넓게 전파하지 않는다"
-    아래 구성은 관리에 필요한 권한을 사용자 정의 Role 하나에 모은다. VDS 조회에는 기존의 기본 제공 Read-only Role을 사용한다. 관리 Role을 vCenter 최상위나 운영 Cluster에 연결하고 전파하면 VM 생성·삭제 권한도 하위 객체에 적용될 수 있다. vCenter 최상위의 전파는 끄고, Cluster 전파는 해당 실습 범위에 VM 관리 권한까지 허용해도 되는지 확인한다. 공유 운영 Cluster에서 배치 권한만 허용하려면 Role 분리가 필요하다.
+    아래 구성은 관리에 필요한 권한을 사용자 정의 Role 하나에 모은다. VDS 조회에는 기존의 기본 제공 Read-only Role을 사용한다. 관리 Role을 vCenter 최상위나 공유 운영 Host에 연결하고 전파하면 VM 생성·삭제 권한도 하위 객체에 적용될 수 있다. vCenter 최상위의 전파는 끄고, Host 전파는 해당 실습 범위에 VM 관리 권한까지 허용해도 되는지 확인한다. 공유 Host에서 배치 권한만 허용하려면 Role 분리가 필요하다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>3-1. 전용 API 사용자 만들기 — 관리 → Single Sign-On → 사용자 및 그룹</summary>
@@ -210,13 +210,13 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 - 이 글의 원본은 `Templates/rocky-9.6-base-v1`이다. `Templates` 폴더 전체가 아니라 **사용할 템플릿 하나**를 선택해 같은 Role을 연결하고 하위 전파는 끈다.
 - 원본 템플릿과 새 VM을 같은 실습 폴더 안에 두면 그 폴더 한 곳에 연결해도 된다. 이 경우 뒤의 `template_path`도 실제 이동한 경로로 바꾼다. 예: `Lab/opentofu/rocky-9.6-base-v1`.
 
-**② 목적지 Cluster 또는 Resource Pool**
+**② 목적지 ESXi Host와 기본 Resource Pool**
 
-경로: **메뉴 → 인벤토리 → 호스트 및 클러스터(Hosts and Clusters) 보기 → vCenter → Datacenter → 목적지 Cluster → 권한**.
+경로: **메뉴 → 인벤토리 → 호스트 및 클러스터(Hosts and Clusters) 보기 → vCenter → Datacenter → 목적지 ESXi Host → 권한**.
 
-- 이 글은 `Lab-Cluster`의 기본 Resource Pool을 쓰므로 Cluster에 `OpenTofu`를 연결하고 **하위 전파를 켠다**. 같은 Role의 VM 관리 권한도 그 범위에 전파될 수 있으므로 실습 Cluster를 사용한다.
-- 특정 Resource Pool을 쓰는 구성이라면 Cluster를 펼쳐 그 **Resource Pool → 권한**에서 연결한다. 하위 pool도 사용할 때만 그 범위로 전파한다. 코드의 `resource_pool_id`도 그 pool로 맞춰야 한다.
-- Cluster 아래 Host까지 VM 관리 Role을 따로 연결하지 않는다. 독립 Host의 기본 pool을 쓰는 구성은 Host 쪽에서 배치 권한을 연결하고, Cluster를 조회하는 코드도 바꿔야 한다. [Broadcom의 연결·전파 절차](https://knowledge.broadcom.com/external/article/409099)
+- 이 글은 `esxi-01.example.com`의 기본 Resource Pool을 쓴다. 목적지 Host에 `OpenTofu`를 연결하고 **하위 전파를 켠다**. 같은 Role의 VM 관리 권한도 그 범위에 전파될 수 있으므로 전용 실습 Host 또는 승인된 범위를 사용한다.
+- `Resource → Assign virtual machine to resource pool`이 실제 기본 Resource Pool에 적용되는지 확인한다. `Resource.AssignVMToPool` 오류가 나오면 Host의 조회 권한과 기본 pool의 유효 권한을 구분해 확인한다.
+- Cluster 권한 연결은 하지 않는다. Host의 네트워크·스토리지·시스템 설정 변경 권한을 범주 전체로 선택하지도 않는다. [Broadcom의 연결·전파 절차](https://knowledge.broadcom.com/external/article/409099)
 
 **③ 목적지 Datastore**
 
@@ -266,7 +266,7 @@ Port group이 아니라 **그 Port group을 제공하는 스위치 자체**를 �
 각 자원의 **권한(Permissions)** 탭에서 사용자·Role·상속 여부를 확인한다. 상위 객체에서 받은 항목은 직접 연결한 항목과 구분해서 보고, 상속받은 권한을 바꾸려면 연결한 상위 객체로 이동한다.
 
 1. 관리자 세션과 다른 브라우저 세션에서 `svc-opentofu@vsphere.local`로 로그인한다.
-2. 원본 템플릿·목적지 폴더·Cluster·Datastore·Port group을 조회할 수 있는지 확인한다. 분산 Port group을 사용하면 해당 VDS도 확인한다.
+2. 원본 템플릿·목적지 폴더·ESXi Host·Datastore·Port group을 조회할 수 있는지 확인한다. 분산 Port group을 사용하면 해당 VDS도 확인한다.
 3. 뒤의 실행 절차에서 `VSPHERE_USER`에 이 계정을 입력하고, 비밀번호는 `VSPHERE_PASSWORD`로 전달한다. Rocky의 `root` 로그인 정보와 혼동하지 않는다.
 4. `tofu plan`으로 조회와 계획을 확인한 뒤, 실습 VM 한 대를 `tofu apply`로 생성한다. 마지막에는 실습 VM을 `tofu destroy`로 삭제해 생성·전원·삭제 권한까지 확인한다.
 
@@ -276,7 +276,7 @@ Port group이 아니라 **그 Port group을 제공하는 스위치 자체**를 �
 | --- | --- |
 | `VirtualMachine.Provisioning.DeployTemplate` | 원본 템플릿 |
 | `VirtualMachine.Inventory.CreateFromExisting` | VM을 만들 목적지 폴더 |
-| `Resource.AssignVMToPool` | 실제 사용할 Resource Pool·Cluster의 전파 |
+| `Resource.AssignVMToPool` | 목적지 독립 Host의 기본 Resource Pool에 적용된 유효 권한 |
 | `Datastore.AllocateSpace` | 선택한 datastore |
 | `Network.Assign` | 선택한 Port group |
 | `StorageProfile.View` | vCenter 최상위에 연결한 Role의 정책 조회 권한 |
@@ -302,10 +302,10 @@ Port group이 아니라 **그 Port group을 제공하는 스위치 자체**를 �
 | 가상 NIC | `ens33`, `ens34`, `ens35`, `ens36`, `ens38` 연결 확인. IP 미할당·UP 상태 |
 | cloud-init | 사용하지 않음 |
 | 호스트명·고정 IP | 원본에 최종 값을 넣지 않고 복제할 때 OpenTofu에서 지정 |
-| SSH 공개키 | Runner의 공개키를 main.tf에 고정 입력하고 복제할 때 등록 |
+| SSH 공개키 | variables.tf의 기본값을 별도 초기화 스크립트로 전달해 등록 |
 | 게스트 커스터마이징 별도 설정 | 호환성 파일이나 vCenter의 저장된 커스터마이징 규격은 아직 구성하지 않음 |
 
-원본 VM에 IP가 없어도 템플릿으로 전환할 수 있다. 다만 **VMware Tools 설치만으로 공개키가 자동 등록되지는 않는다.** 이 예제는 main.tf 안에서 공개키 등록과 uplink 설정을 실행하므로 아래의 스크립트 실행 허용을 먼저 준비한다.
+원본 VM에 IP가 없어도 템플릿으로 전환할 수 있다. 다만 **VMware Tools 설치만으로 공개키가 자동 등록되지는 않는다.** 이 예제는 별도 초기화 스크립트로 공개키 등록과 uplink 설정을 실행하므로 아래의 스크립트 실행 허용을 먼저 준비한다.
 
 <p class="subsection-title"><strong>4-1. 원본 VM에서 준비한 패키지와 서비스</strong></p>
 
@@ -342,7 +342,7 @@ ip -br -4 address
 
 <div class="section-body" markdown="1">
 
-OpenTofu의 vSphere Provider는 `clone.customize.linux_options.script_text`로 복제 VM 안에서 실행할 명령을 전달할 수 있다. **main.tf의 고정 공개키 → vCenter → VMware Tools → 복제 VM의 `authorized_keys`**로 이어진다. 키 전달에 게스트 SSH 접속은 필요하지 않다. 별도 스크립트 파일은 만들지 않는다. [Provider의 `script_text`](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#linux-customization-options)
+OpenTofu의 vSphere Provider는 `clone.customize.linux_options.script_text`로 복제 VM 안에서 실행할 명령을 전달할 수 있다. **variables.tf의 공개키 → guest-init.sh.tftpl → vCenter → VMware Tools → 복제 VM의 `authorized_keys`**로 이어진다. 키 전달에 게스트 SSH 접속은 필요하지 않다. main.tf에는 스크립트를 읽는 호출만 둔다. [Provider의 `script_text`](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#linux-customization-options)
 
 아래는 기존 준비에 더할 절차다. 원본 VM의 콘솔에서 스크립트 실행을 허용한다. 공개키를 콘솔에 입력할 필요는 없다.
 
@@ -360,14 +360,14 @@ vmware-toolbox-cmd config get deployPkg enable-custom-scripts
 Runner에서 **실제로 SSH를 실행할 계정의 공개키**를 확인한다. 경로는 예시이며 `.pub` 파일 내용 한 줄 전체를 복사한다.
 
 ```bash title="Runner — 공개키 확인"
-cat /var/lib/gitea-runner/.ssh/id_ed25519.pub
+cat ~/.ssh/id_ed25519.pub
 ```
 
-5번 `main.tf`의 `key='...'`에 이 문자열을 넣는다. 개인키 파일은 코드에 넣거나 VM으로 전달하지 않는다. 공개키가 없다면 먼저 Runner의 SSH 키 쌍을 준비한다.
+5번 `variables.tf`의 `ssh_public_key`에는 사용할 Runner의 공개키를 기본값으로 설정한다. 같은 Runner라면 이 값을 다시 입력하지 않는다. 다른 환경에서는 위에서 확인한 공개키로 바꾼다. 개인키 파일은 코드에 넣거나 VM으로 전달하지 않는다. 공개키가 없다면 먼저 Runner의 SSH 키 쌍을 준비한다.
 
 - `postcustomization` 시점에 실행한다. 같은 키는 중복 등록하지 않고 권한·SELinux 컨텍스트를 맞춘다. `root` 로그인 허용 정책 자체는 바꾸지 않는다.
-- Runner가 고정이면 공개키도 고정 입력한다. Base64·공개키 경로 변수는 사용하지 않는다.
-- Runner 키가 바뀌면 `main.tf`의 공개키를 바꾼다. 템플릿을 다시 만들 필요는 없지만, 커스터마이징 변경이 기존 VM 교체를 유발하는지는 새 plan에서 확인한다.
+- Runner가 고정이면 `ssh_public_key` 기본값을 그대로 사용한다. 공개키 파일 경로를 매번 지정하지 않는다.
+- Runner 키가 바뀌면 변수 기본값을 바꾸거나 lab.tfvars에서 덮어쓴다. 템플릿을 다시 만들 필요는 없지만, 커스터마이징 변경이 기존 VM 교체를 유발하는지는 새 plan에서 확인한다.
 
 처음에는 VM 한 대로 IP·호스트명·uplink 상태·SSH 접속을 확인한 뒤 여러 대로 늘린다. `[확인 필요]` 이 다중 NIC 예제의 실제 게스트 초기화·SSH 접속 결과. 이미 복제에 성공한 기존 코드와는 구분한다.
 
@@ -405,7 +405,7 @@ mkdir -p ~/opentofu-learning/vmware-lab
 cd ~/opentofu-learning/vmware-lab
 ```
 
-아래 여섯 파일을 같은 디렉터리에 작성한다. `.tf` 파일 5개와 `lab.tfvars`다. 공개키 등록·uplink 설정은 `main.tf` 안에 직접 넣는다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
+아래 일곱 파일을 같은 디렉터리에 작성한다. `.tf` 파일 5개, `lab.tfvars`, `guest-init.sh.tftpl`이다. VM 구성은 main.tf, 공개키·uplink 초기화 명령은 별도 스크립트로 분리한다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
 
 **VM 사양·NIC 연결은 템플릿을 재사용하고, VM마다 이름·IP 4개만 지정한다.** CPU·메모리·디스크 값을 각 VM에 반복해서 적지 않는다. 이름은 `vms`의 key이고, 고정 IP는 `ipv4_addresses`의 순서 있는 목록이다.
 
@@ -416,7 +416,8 @@ cd ~/opentofu-learning/vmware-lab
 | 디스크 크기·배치·프로비저닝 | 조회한 템플릿의 `disks` 목록 |
 | NIC 수·순서·Port group·adapter type | 템플릿의 `network_interfaces` 목록 |
 | 호스트명·고정 IP 4개 | `vms`의 이름과 `ipv4_addresses` |
-| provider uplink | main.tf에서 `ens38`의 연결 프로필을 수정, IP 없이 UP |
+| provider uplink | `provider_uplink_interface` 기본값 `ens38`, 별도 스크립트에서 IP 없이 UP |
+| SSH 공개키 | `ssh_public_key` 기본값, Runner 변경 시에만 교체 |
 | IPv4 prefix | 공통 변수 `ipv4_prefix`, 기본값 `24` |
 | 중첩 가상화 | 공통 변수 `nested_hv`, 기본값 `false` |
 
@@ -479,7 +480,7 @@ variable "datacenter_name" {
   type = string
 }
 
-variable "cluster_name" {
+variable "host_name" {
   type = string
 }
 
@@ -517,6 +518,16 @@ variable "nested_hv" {
   default = false
 }
 
+variable "provider_uplink_interface" {
+  type    = string
+  default = "ens38"
+}
+
+variable "ssh_public_key" {
+  type    = string
+  default = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPE7hzFYY5Mx8wRk2Xzxm6llfFHO2faY+FNH/zEfTpVD runner"
+}
+
 variable "vms" {
   type = map(object({
     ipv4_addresses = list(string)
@@ -547,8 +558,8 @@ data "vsphere_datacenter" "dc" {
   name = var.datacenter_name
 }
 
-data "vsphere_compute_cluster" "cluster" {
-  name          = var.cluster_name
+data "vsphere_host" "host" {
+  name          = var.host_name
   datacenter_id = data.vsphere_datacenter.dc.id
 }
 
@@ -567,7 +578,8 @@ resource "vsphere_virtual_machine" "vm" {
 
   name             = each.key
   folder           = var.vm_folder
-  resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
+  resource_pool_id = data.vsphere_host.host.resource_pool_id
+  host_system_id   = data.vsphere_host.host.id
   datastore_id     = data.vsphere_datastore.storage.id
 
   num_cpus             = data.vsphere_virtual_machine.template.num_cpus
@@ -611,32 +623,10 @@ resource "vsphere_virtual_machine" "vm" {
         host_name = each.key
         domain    = var.domain
 
-        script_text = <<-SCRIPT
-          #!/bin/bash
-          set -eu
-          [ "$1" = "postcustomization" ] || exit 0
-          exec >> /var/log/opentofu-guest-init.log 2>&1
-
-          # Runner의 공개키 한 줄 전체로 교체
-          key='ssh-ed25519 AAAA... runner'
-
-          install -d -m 700 /root/.ssh
-          touch /root/.ssh/authorized_keys
-          grep -qxF -- "$key" /root/.ssh/authorized_keys ||
-            printf '%s\n' "$key" >> /root/.ssh/authorized_keys
-          chmod 600 /root/.ssh/authorized_keys
-          restorecon -R /root/.ssh
-
-          # ens38에 연결된 실제 프로필 이름으로 교체
-          uplink_profile='System ens38'
-
-          test "$(nmcli -g connection.interface-name connection show "$uplink_profile")" = ens38
-          nmcli connection modify "$uplink_profile" \
-            ipv4.method disabled ipv6.method disabled connection.autoconnect yes
-          nmcli connection up "$uplink_profile" ifname ens38
-
-          echo 'guest-init complete'
-        SCRIPT
+        script_text = templatefile("${path.module}/guest-init.sh.tftpl", {
+          ssh_public_key            = var.ssh_public_key
+          provider_uplink_interface = var.provider_uplink_interface
+        })
       }
 
       dynamic "network_interface" {
@@ -672,10 +662,10 @@ resource "vsphere_virtual_machine" "vm" {
 - `template.id`는 템플릿 UUID다. 이름으로 조회해 얻은 값을 clone에 전달한다.
 - `num_cpus`, `num_cores_per_socket`, `memory`는 조회한 템플릿 사양을 사용한다.
 - `dynamic "disk"`는 조회한 디스크마다 `disk` 블록을 만들어 크기·SCSI 장치 번호·프로비저닝을 맞춘다. OS 디스크 하나뿐이면 블록도 하나다.
-- `cluster.resource_pool_id`로 VM이 사용할 자원 pool을 선택한다.
+- `host.resource_pool_id`로 독립 ESXi Host의 기본 자원 풀을 선택하고, `host_system_id`로 같은 Host에 VM을 배치한다.
 - 바깥 `dynamic "network_interface"`는 **템플릿의 NIC 5개를 같은 순서·Port group·adapter type으로 연결**한다. `network_name`을 따로 입력하지 않는다.
 - `customize` 안의 `dynamic "network_interface"`는 **앞 4개 NIC의 Rocky 내부 IP를 목록 순서대로 설정**한다. 마지막 빈 블록은 uplink에 대응한다.
-- `script_text`는 공개키 등록과 `ens38` 설정 명령을 직접 전달한다. 별도 파일이나 `templatefile()`은 사용하지 않는다.
+- `templatefile()`은 별도 초기화 스크립트에 두 변수 값을 넣는다. main.tf에는 셸 명령을 작성하지 않는다.
 - `firmware`, `guest_id`, `scsi_type`는 템플릿 값을 따른다. EFI 템플릿을 BIOS로 만드는 실수를 피한다.
 - `linked_clone = false`는 Full Clone이다. 복제 후 디스크가 원본 snapshot에 의존하지 않도록 시작한다.
 - clone·customization·guest network timeout은 서로 다른 대기 단계이며 단위는 분이다.
@@ -686,23 +676,51 @@ resource "vsphere_virtual_machine" "vm" {
 
 조회할 템플릿 속성은 [VM data source](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md), 복제와 커스터마이징 옵션은 [VM resource](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)를 참고한다.
 
-**main.tf에서 바꿀 고정값은 두 개**
+**guest-init.sh.tftpl — 공개키 등록과 provider uplink 설정**
 
-1. `key`: Runner의 실제 공개키 한 줄 전체. `AAAA...`는 생략 표기이므로 그대로 사용하지 않는다.
-2. `uplink_profile`: `ens38`에 연결된 실제 NetworkManager 프로필 이름. `System ens38`은 예시다.
+main.tf와 같은 디렉터리에 아래 파일을 둔다. `.tftpl`은 OpenTofu가 변수 값을 넣어 읽는 템플릿 파일 확장자다. 결과는 **복제 VM의 VMware Tools가 실행**한다. Runner에서 이 파일을 직접 실행하지 않는다. [templatefile](https://opentofu.org/docs/language/functions/templatefile/)
 
-`script_text`는 Runner의 셸이 아니라 **복제 VM의 VMware Tools가 실행**한다. 공개키를 등록한 다음 uplink 프로필을 수정한다. `test` 한 줄은 해당 프로필이 `ens38`에 연결됐는지 확인하고, 이름이 잘못됐으면 다른 NIC를 바꾸기 전에 중단한다.
+<details class="analysis-toggle" markdown="1">
+<summary>guest-init.sh.tftpl 전체 코드</summary>
 
-처음 복제한 VM의 콘솔에서 실제 프로필을 확인한다. 커스터마이징 후 프로필 이름이 템플릿과 달라질 수 있다. `NAME`과 `DEVICE`는 같은 이름일 필요가 없다. DEVICE가 비어 있으면 후보 프로필의 `connection.interface-name`을 확인한다.
+```bash title="guest-init.sh.tftpl"
+#!/bin/bash
+set -eu
+[ "$1" = "postcustomization" ] || exit 0
+exec >> /var/log/opentofu-guest-init.log 2>&1
 
-```bash title="복제 VM — ens38의 연결 프로필 확인"
-nmcli -f NAME,DEVICE connection show
-nmcli -g connection.interface-name connection show "System ens38"
+key='${ssh_public_key}'
+uplink='${provider_uplink_interface}'
+
+install -d -m 700 /root/.ssh
+touch /root/.ssh/authorized_keys
+grep -qxF -- "$key" /root/.ssh/authorized_keys ||
+  printf '%s\n' "$key" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+restorecon -R /root/.ssh
+
+for profile in $(nmcli -g UUID connection show); do
+  device="$(nmcli -g connection.interface-name connection show uuid "$profile")"
+  if [ "$device" = "$uplink" ]; then
+    nmcli connection modify uuid "$profile" \
+      ipv4.method disabled ipv6.method disabled connection.autoconnect yes
+    nmcli connection up uuid "$profile" ifname "$uplink"
+    echo 'guest-init complete'
+    exit 0
+  fi
+done
+
+echo "No connection profile bound to $uplink" >&2
+exit 1
 ```
 
-두 번째 명령의 `System ens38`도 실제 후보 이름으로 바꾼다. 처음 실행에서 프로필 이름이 틀려 중단했다면 공개키 등록은 그보다 먼저 수행된다. 로그와 프로필을 확인해 main.tf를 수정하고 새 plan에서 교체 대상을 확인한다. `root` SSH 허용 조건도 맞아야 한다.
+</details>
 
-`ipv4.method disabled`와 `ipv6.method disabled`는 해당 프로필의 IPv4·IPv6를 비활성화한다. `connection up`으로 NIC 연결을 활성화한다. [NetworkManager 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
+공개키와 NIC 이름은 스크립트에 다시 쓰지 않는다. `ssh_public_key`, `provider_uplink_interface`의 기본값을 전달받는다. Runner와 템플릿이 같으면 lab.tfvars에서 두 값을 반복 지정할 필요가 없다.
+
+프로필의 표시 이름을 `System ens38` 등으로 고정하지 않고, `connection.interface-name`이 대상 NIC인 프로필을 찾는다. NIC마다 하나의 연결 프로필을 사용하는 템플릿을 기준으로 한다. 일치하는 프로필이 없으면 새 프로필을 임의로 만들지 않고 오류로 중단한다. 여러 프로필이 같은 NIC에 연결돼 있으면 실제 사용할 프로필을 먼저 정리한다.
+
+`ipv4.method disabled`와 `ipv6.method disabled`는 해당 프로필의 IPv4·IPv6를 비활성화한다. `connection up`으로 NIC 연결을 활성화한다. 관리 NIC를 provider uplink 변수에 지정하지 않는다. [NetworkManager 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
 
 완료 시 `/var/log/opentofu-guest-init.log`에 `guest-init complete`를 남긴다. 3편은 이 표시와 SSH 접속을 확인한 뒤 설치를 시작한다. 로그만으로 앞 4개 NIC의 주소 설정까지 성공했다고 판단하지 않는다.
 
@@ -729,13 +747,13 @@ output "vm_info" {
 예제의 이름·문서용 IP를 실제 테스트 환경의 값으로 바꾼다. 공개 예제는 서로 겹치지 않는 네트워크 4개를 표현하려고 문서용 대역을 `/25`로 나눴다. 실제 환경이 `/24`라면 `ipv4_prefix = 24`와 실제 주소를 함께 넣는다. `255.255.255.0` 문자열을 넣는 자리가 아니다.
 
 !!! warning "기존 코드에서 바꿀 때는 VM 이름을 유지"
-    `variables.tf`, `main.tf`, `outputs.tf`, `lab.tfvars`를 함께 맞춘다. 공개키·uplink 설정은 main.tf 안에 넣고, 예전 공개키 경로·uplink 변수는 사용하지 않는다. 이미 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. NIC·커스터마이징 변경으로 VM 교체가 포함될 수 있다. 기존 계획 파일 대신 새 `tofu plan`으로 대상을 확인한다.
+    `variables.tf`, `main.tf`, `outputs.tf`, `lab.tfvars`를 함께 맞추고 `guest-init.sh.tftpl`을 추가한다. 예전 Cluster 조회·입력은 Host 조회·host_name으로 바꾼다. 이미 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. 배치·NIC·커스터마이징 변경의 영향은 새 `tofu plan`으로 확인한다. 기존 계획 파일은 재사용하지 않는다.
 
 ```hcl title="lab.tfvars"
 vcenter_server = "vcenter.example.com"
 
 datacenter_name = "Lab-DC"
-cluster_name    = "Lab-Cluster"
+host_name       = "esxi-01.example.com"
 datastore_name  = "lab-datastore"
 template_path   = "Templates/rocky-9.6-base-v1"
 vm_folder       = "Lab/opentofu"
@@ -754,7 +772,9 @@ vms = {
 
 CPU·메모리·디스크 입력은 필요 없다. 예를 들어 템플릿이 16 vCPU·32GiB 메모리·OS 디스크 100GiB라면 같은 사양으로 복제한다. 이 수치는 설명용이며 실제 값은 `tofu plan`에서 조회 결과를 확인한다. 원하는 검증 환경에 필요한 사양은 템플릿에서 먼저 준비한다.
 
-Runner의 공개키와 uplink 프로필 이름은 main.tf의 두 고정값만 맞춘다. 이미 같은 공개키가 들어 있으면 중복 추가하지 않는다. SSH 접속에는 그 공개키와 짝이 맞는 Runner의 개인키를 사용한다.
+`ssh_public_key`와 `provider_uplink_interface`는 variables.tf의 기본값을 사용하므로 이 예제의 lab.tfvars에는 쓰지 않는다. 다른 Runner·템플릿을 사용할 때만 여기서 덮어쓴다. 이미 같은 공개키가 들어 있으면 중복 추가하지 않는다. SSH 접속에는 그 공개키와 짝이 맞는 Runner의 개인키를 사용한다.
+
+`host_name`은 **VM 호스트명이 아니라 vCenter에 등록된 ESXi Host 이름**이다. 복제 VM의 호스트명은 기존처럼 `vms`의 key에서 가져온다.
 
 ## 6. 인증과 조회부터 시작
 
@@ -909,7 +929,7 @@ tofu show retry.tfplan
 
 **실습 VM 삭제**
 
-아래 계획은 **현재 State가 관리하는 VM**을 삭제한다. source 템플릿과 data source로 조회한 Cluster·Datastore·Port group은 삭제 대상이 아니다. 삭제된 게스트의 디스크와 데이터는 백업이 없으면 복구할 수 없다.
+아래 계획은 **현재 State가 관리하는 VM**을 삭제한다. source 템플릿과 data source로 조회한 ESXi Host·Datastore·Port group은 삭제 대상이 아니다. 삭제된 게스트의 디스크와 데이터는 백업이 없으면 복구할 수 없다.
 
 ```bash
 tofu state list
@@ -933,7 +953,7 @@ unset VSPHERE_USER VSPHERE_PASSWORD
 | --- | --- | --- |
 | x509 인증서 오류 | CA 신뢰·SAN·접속 주소 | 실행 서버의 curl, Provider TLS 설정 |
 | 로그인 실패 | vCenter API 계정과 SSO 도메인 | 같은 계정의 vSphere Client 로그인 |
-| Datacenter·Cluster 조회 실패 | 실제 이름·조회 권한 | Hosts and Clusters |
+| Datacenter·ESXi Host 조회 실패 | 실제 이름·조회 권한 | Hosts and Clusters |
 | 템플릿을 찾지 못함 | Datacenter 기준 상대 폴더·이름 | VMs and Templates |
 | Permission denied | 원본·목적지·네트워크·스토리지 권한 | 오류 privilege, 각 객체 Permissions |
 | 재구성 중 `VirtualMachine.Config.Resource` 누락 | VM 자원 할당 변경 권한 | 기존 Role의 **가상 시스템 → 구성 변경 → 리소스 변경** |
@@ -994,6 +1014,7 @@ tofu output -json vm_info > vm-info.json
 - [분산 Port group 연결 시 VDS 조회 권한](https://github.com/vmware/govmomi/blob/main/object/distributed_virtual_portgroup.go)
 - [VDS Read-only 권한 연결 사례](https://williamlam.com/2023/06/custom-vcenter-server-role-using-vsphere-terraform-provider-on-vmware-cloud-on-aws.html)
 - [VM 템플릿 조회](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md)
+- [독립 ESXi Host와 기본 Resource Pool 조회](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/host.md)
 - [VM 생성·clone·커스터마이징](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)
 - [VMware Tools 커스터마이징 스크립트 허용·실행 시점](https://knowledge.broadcom.com/external/article/313048/setting-the-customization-script-for-vir.html)
 - [NetworkManager의 IPv4·IPv6 비활성화 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
