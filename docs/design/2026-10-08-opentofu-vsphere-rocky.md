@@ -302,10 +302,10 @@ Port group이 아니라 **그 Port group을 제공하는 스위치 자체**를 �
 | 가상 NIC | `ens33`, `ens34`, `ens35`, `ens36`, `ens38` 연결 확인. IP 미할당·UP 상태 |
 | cloud-init | 사용하지 않음 |
 | 호스트명·고정 IP | 원본에 최종 값을 넣지 않고 복제할 때 OpenTofu에서 지정 |
-| SSH 공개키 | 아직 미등록. 복제할 때 VMware Tools 스크립트로 등록하는 방식 선택 가능 |
+| SSH 공개키 | Runner의 공개키를 main.tf에 고정 입력하고 복제할 때 등록 |
 | 게스트 커스터마이징 별도 설정 | 호환성 파일이나 vCenter의 저장된 커스터마이징 규격은 아직 구성하지 않음 |
 
-원본 VM에 IP가 없어도 템플릿으로 전환할 수 있다. 다만 **VMware Tools 설치만으로 공개키가 자동 등록되지는 않는다.** 공개키 자동 등록을 선택한다면 아래의 스크립트 실행 허용을 먼저 준비한다.
+원본 VM에 IP가 없어도 템플릿으로 전환할 수 있다. 다만 **VMware Tools 설치만으로 공개키가 자동 등록되지는 않는다.** 이 예제는 main.tf 안에서 공개키 등록과 uplink 설정을 실행하므로 아래의 스크립트 실행 허용을 먼저 준비한다.
 
 <p class="subsection-title"><strong>4-1. 원본 VM에서 준비한 패키지와 서비스</strong></p>
 
@@ -342,7 +342,7 @@ ip -br -4 address
 
 <div class="section-body" markdown="1">
 
-OpenTofu의 vSphere Provider는 `clone.customize.linux_options.script_text`로 복제 VM 안에서 실행할 스크립트를 전달할 수 있다. **Runner의 공개키 파일 → OpenTofu → vCenter → VMware Tools → 복제 VM의 `authorized_keys`**로 이어진다. 키 전달에 게스트 SSH 접속은 필요하지 않다. [Provider의 `script_text`](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#linux-customization-options)
+OpenTofu의 vSphere Provider는 `clone.customize.linux_options.script_text`로 복제 VM 안에서 실행할 명령을 전달할 수 있다. **main.tf의 고정 공개키 → vCenter → VMware Tools → 복제 VM의 `authorized_keys`**로 이어진다. 키 전달에 게스트 SSH 접속은 필요하지 않다. 별도 스크립트 파일은 만들지 않는다. [Provider의 `script_text`](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#linux-customization-options)
 
 아래는 기존 준비에 더할 절차다. 원본 VM의 콘솔에서 스크립트 실행을 허용한다. 공개키를 콘솔에 입력할 필요는 없다.
 
@@ -355,12 +355,19 @@ vmware-toolbox-cmd config get deployPkg enable-custom-scripts
 
 **저장된 커스터마이징 규격을 만드는 작업과, 복제할 때 `customize`로 값을 전달하는 작업은 다르다.** 여기서는 별도의 규격을 미리 만들지 않고 OpenTofu 코드에서 호스트명·IP·공개키 등록 스크립트를 함께 전달한다.
 
-5번의 `guest-init.sh.tftpl`이 공개키 등록과 provider uplink 초기화를 함께 처리한다. 코드를 두 군데에 복사하지 않고 `main.tf`의 `templatefile()`로 한 번 읽는다.
+**VM 생성 자체에 공개키가 필수인 것은 아니다.** 이 가이드와 3편은 Runner가 VM에 비밀번호 없이 SSH로 접속하는 구성이므로 공개키 등록을 사용한다. 템플릿에 이미 같은 키가 등록돼 있어도 되며, 비밀번호 인증 등 다른 방식은 별도 접속 설정이 필요하다. vCenter API 계정과 VM의 SSH 키는 서로 다른 인증이다.
 
-- `ssh_public_key_path`에는 **실제로 SSH를 실행할 Runner 계정의 `.pub` 파일** 경로를 넣는다. 개인키는 VM에 전달하지 않는다.
-- 공개키는 Base64로 전달한 뒤 복원한다. Base64는 인코딩이며 암호화가 아니다.
+Runner에서 **실제로 SSH를 실행할 계정의 공개키**를 확인한다. 경로는 예시이며 `.pub` 파일 내용 한 줄 전체를 복사한다.
+
+```bash title="Runner — 공개키 확인"
+cat /var/lib/gitea-runner/.ssh/id_ed25519.pub
+```
+
+5번 `main.tf`의 `key='...'`에 이 문자열을 넣는다. 개인키 파일은 코드에 넣거나 VM으로 전달하지 않는다. 공개키가 없다면 먼저 Runner의 SSH 키 쌍을 준비한다.
+
 - `postcustomization` 시점에 실행한다. 같은 키는 중복 등록하지 않고 권한·SELinux 컨텍스트를 맞춘다. `root` 로그인 허용 정책 자체는 바꾸지 않는다.
-- 테스트 Runner와 실제 Runner가 다른 키를 사용하면 공개키 경로만 바꾼다. **키가 바뀔 때마다 템플릿을 다시 만들 필요는 없다.**
+- Runner가 고정이면 공개키도 고정 입력한다. Base64·공개키 경로 변수는 사용하지 않는다.
+- Runner 키가 바뀌면 `main.tf`의 공개키를 바꾼다. 템플릿을 다시 만들 필요는 없지만, 커스터마이징 변경이 기존 VM 교체를 유발하는지는 새 plan에서 확인한다.
 
 처음에는 VM 한 대로 IP·호스트명·uplink 상태·SSH 접속을 확인한 뒤 여러 대로 늘린다. `[확인 필요]` 이 다중 NIC 예제의 실제 게스트 초기화·SSH 접속 결과. 이미 복제에 성공한 기존 코드와는 구분한다.
 
@@ -398,7 +405,7 @@ mkdir -p ~/opentofu-learning/vmware-lab
 cd ~/opentofu-learning/vmware-lab
 ```
 
-아래 일곱 파일을 같은 디렉터리에 작성한다. `.tf` 파일 5개, `lab.tfvars`, `guest-init.sh.tftpl`이다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
+아래 여섯 파일을 같은 디렉터리에 작성한다. `.tf` 파일 5개와 `lab.tfvars`다. 공개키 등록·uplink 설정은 `main.tf` 안에 직접 넣는다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
 
 **VM 사양·NIC 연결은 템플릿을 재사용하고, VM마다 이름·IP 4개만 지정한다.** CPU·메모리·디스크 값을 각 VM에 반복해서 적지 않는다. 이름은 `vms`의 key이고, 고정 IP는 `ipv4_addresses`의 순서 있는 목록이다.
 
@@ -409,7 +416,7 @@ cd ~/opentofu-learning/vmware-lab
 | 디스크 크기·배치·프로비저닝 | 조회한 템플릿의 `disks` 목록 |
 | NIC 수·순서·Port group·adapter type | 템플릿의 `network_interfaces` 목록 |
 | 호스트명·고정 IP 4개 | `vms`의 이름과 `ipv4_addresses` |
-| provider uplink | `provider_uplink_interface`의 NIC, IP 없이 UP |
+| provider uplink | main.tf에서 `ens38`의 연결 프로필을 수정, IP 없이 UP |
 | IPv4 prefix | 공통 변수 `ipv4_prefix`, 기본값 `24` |
 | 중첩 가상화 | 공통 변수 `nested_hv`, 기본값 `false` |
 
@@ -510,22 +517,6 @@ variable "nested_hv" {
   default = false
 }
 
-variable "ssh_public_key_path" {
-  type        = string
-  description = "Runner의 공개키 파일. 이미 키가 등록된 템플릿이면 빈 문자열"
-  default     = ""
-}
-
-variable "provider_uplink_interface" {
-  type    = string
-  default = "ens38"
-
-  validation {
-    condition     = can(regex("^[a-zA-Z0-9_.:-]+$", var.provider_uplink_interface))
-    error_message = "provider uplink의 실제 인터페이스 이름을 지정한다."
-  }
-}
-
 variable "vms" {
   type = map(object({
     ipv4_addresses = list(string)
@@ -620,13 +611,32 @@ resource "vsphere_virtual_machine" "vm" {
         host_name = each.key
         domain    = var.domain
 
-        script_text = templatefile("${path.module}/guest-init.sh.tftpl", {
-          uplink        = var.provider_uplink_interface
-          protected_ips = join(" ", each.value.ipv4_addresses)
-          public_key_b64 = var.ssh_public_key_path == "" ? "" : base64encode(
-            trimspace(file(pathexpand(var.ssh_public_key_path)))
-          )
-        })
+        script_text = <<-SCRIPT
+          #!/bin/bash
+          set -eu
+          [ "$1" = "postcustomization" ] || exit 0
+          exec >> /var/log/opentofu-guest-init.log 2>&1
+
+          # Runner의 공개키 한 줄 전체로 교체
+          key='ssh-ed25519 AAAA... runner'
+
+          install -d -m 700 /root/.ssh
+          touch /root/.ssh/authorized_keys
+          grep -qxF -- "$key" /root/.ssh/authorized_keys ||
+            printf '%s\n' "$key" >> /root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
+          restorecon -R /root/.ssh
+
+          # ens38에 연결된 실제 프로필 이름으로 교체
+          uplink_profile='System ens38'
+
+          test "$(nmcli -g connection.interface-name connection show "$uplink_profile")" = ens38
+          nmcli connection modify "$uplink_profile" \
+            ipv4.method disabled ipv6.method disabled connection.autoconnect yes
+          nmcli connection up "$uplink_profile" ifname ens38
+
+          echo 'guest-init complete'
+        SCRIPT
       }
 
       dynamic "network_interface" {
@@ -665,7 +675,7 @@ resource "vsphere_virtual_machine" "vm" {
 - `cluster.resource_pool_id`로 VM이 사용할 자원 pool을 선택한다.
 - 바깥 `dynamic "network_interface"`는 **템플릿의 NIC 5개를 같은 순서·Port group·adapter type으로 연결**한다. `network_name`을 따로 입력하지 않는다.
 - `customize` 안의 `dynamic "network_interface"`는 **앞 4개 NIC의 Rocky 내부 IP를 목록 순서대로 설정**한다. 마지막 빈 블록은 uplink에 대응한다.
-- `templatefile()`은 아래 초기화 파일에 공개키·uplink 이름·보호할 고정 IP를 넣어 VMware Tools에 전달한다.
+- `script_text`는 공개키 등록과 `ens38` 설정 명령을 직접 전달한다. 별도 파일이나 `templatefile()`은 사용하지 않는다.
 - `firmware`, `guest_id`, `scsi_type`는 템플릿 값을 따른다. EFI 템플릿을 BIOS로 만드는 실수를 피한다.
 - `linked_clone = false`는 Full Clone이다. 복제 후 디스크가 원본 snapshot에 의존하지 않도록 시작한다.
 - clone·customization·guest network timeout은 서로 다른 대기 단계이며 단위는 분이다.
@@ -676,75 +686,25 @@ resource "vsphere_virtual_machine" "vm" {
 
 조회할 템플릿 속성은 [VM data source](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md), 복제와 커스터마이징 옵션은 [VM resource](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)를 참고한다.
 
-**guest-init.sh.tftpl — 공개키 등록과 IP 없는 uplink 초기화**
+**main.tf에서 바꿀 고정값은 두 개**
 
-이 파일은 Runner에서 직접 실행하지 않는다. `templatefile()`로 읽어 `script_text`에 넣고 **복제 VM의 VMware Tools가 실행**한다. 마지막 NIC 이름이 잘못됐거나 앞 4개 고정 IP가 그 NIC에 붙어 있으면 중단한다. 다른 NIC나 NetworkManager 서비스 전체는 재시작하지 않는다.
+1. `key`: Runner의 실제 공개키 한 줄 전체. `AAAA...`는 생략 표기이므로 그대로 사용하지 않는다.
+2. `uplink_profile`: `ens38`에 연결된 실제 NetworkManager 프로필 이름. `System ens38`은 예시다.
 
-<details class="analysis-toggle" markdown="1">
-<summary>guest-init.sh.tftpl 전체 코드와 확인 방법</summary>
+`script_text`는 Runner의 셸이 아니라 **복제 VM의 VMware Tools가 실행**한다. 공개키를 등록한 다음 uplink 프로필을 수정한다. `test` 한 줄은 해당 프로필이 `ens38`에 연결됐는지 확인하고, 이름이 잘못됐으면 다른 NIC를 바꾸기 전에 중단한다.
 
-```bash title="guest-init.sh.tftpl"
-#!/bin/sh
-set -eu
-[ "$${1:-}" = "postcustomization" ] || exit 0
-exec >> /var/log/opentofu-guest-init.log 2>&1
+처음 복제한 VM의 콘솔에서 실제 프로필을 확인한다. 커스터마이징 후 프로필 이름이 템플릿과 달라질 수 있다. `NAME`과 `DEVICE`는 같은 이름일 필요가 없다. DEVICE가 비어 있으면 후보 프로필의 `connection.interface-name`을 확인한다.
 
-uplink='${uplink}'
-profile='opentofu-provider-uplink'
-ip link show dev "$uplink" >/dev/null
-
-addresses="$(ip -o -4 addr show dev "$uplink" | awk '{print $4}' | cut -d/ -f1)"
-for ip in ${protected_ips}; do
-  if printf '%s\n' "$addresses" | grep -qxF -- "$ip"; then
-    echo "Refusing to change a static-IP interface: $uplink"
-    exit 1
-  fi
-done
-
-# 대상 NIC에 연결된 기존 프로필의 자동 연결만 중지한다.
-for uuid in $(nmcli -g UUID connection show); do
-  device="$(nmcli -g connection.interface-name connection show uuid "$uuid")"
-  if [ "$device" = "$uplink" ]; then
-    nmcli connection modify uuid "$uuid" connection.autoconnect no
-  fi
-done
-
-if ! nmcli connection show "$profile" >/dev/null 2>&1; then
-  nmcli connection add type ethernet con-name "$profile" ifname "$uplink" \
-    ipv4.method disabled ipv6.method disabled
-fi
-nmcli connection modify "$profile" connection.interface-name "$uplink" \
-  connection.autoconnect yes connection.autoconnect-priority 100 \
-  ipv4.method disabled ipv6.method disabled
-nmcli connection up "$profile" ifname "$uplink"
-
-key="$(printf '%s' '${public_key_b64}' | base64 -d)"
-if [ -n "$key" ]; then
-  install -d -m 700 /root/.ssh
-  touch /root/.ssh/authorized_keys
-  grep -qxF -- "$key" /root/.ssh/authorized_keys || \
-    printf '%s\n' "$key" >> /root/.ssh/authorized_keys
-  chmod 600 /root/.ssh/authorized_keys
-  chown root:root /root/.ssh /root/.ssh/authorized_keys
-  restorecon -R /root/.ssh
-fi
-echo 'guest-init complete'
+```bash title="복제 VM — ens38의 연결 프로필 확인"
+nmcli -f NAME,DEVICE connection show
+nmcli -g connection.interface-name connection show "System ens38"
 ```
 
-`ipv4.method disabled`와 `ipv6.method disabled`는 해당 프로필의 IPv4·IPv6를 비활성화한다. NIC는 연결 상태로 유지한다. [NetworkManager 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
+두 번째 명령의 `System ens38`도 실제 후보 이름으로 바꾼다. 처음 실행에서 프로필 이름이 틀려 중단했다면 공개키 등록은 그보다 먼저 수행된다. 로그와 프로필을 확인해 main.tf를 수정하고 새 plan에서 교체 대상을 확인한다. `root` SSH 허용 조건도 맞아야 한다.
 
-`$${1:-}`의 이중 `$`는 OpenTofu 템플릿 처리 후 셸의 `${1:-}`로 남기기 위한 표기다. `protected_ips`에는 앞 4개 NIC의 고정 IP만 들어간다.
+`ipv4.method disabled`와 `ipv6.method disabled`는 해당 프로필의 IPv4·IPv6를 비활성화한다. `connection up`으로 NIC 연결을 활성화한다. [NetworkManager 설정](https://www.networkmanager.dev/docs/api/1.46.0/nm-settings-nmcli.html)
 
-VM 안에서 로그 끝의 `guest-init complete`를 확인한다. `ens38`에 주소가 없고 link가 UP인지 함께 확인한다. 스크립트의 완료 로그만으로 나머지 NIC 설정까지 성공했다고 판단하지 않는다.
-
-```bash
-cat /var/log/opentofu-guest-init.log
-ip -br link show dev ens38
-ip -br address show dev ens38
-nmcli -g ipv4.method,ipv6.method connection show opentofu-provider-uplink
-```
-
-</details>
+완료 시 `/var/log/opentofu-guest-init.log`에 `guest-init complete`를 남긴다. 3편은 이 표시와 SSH 접속을 확인한 뒤 설치를 시작한다. 로그만으로 앞 4개 NIC의 주소 설정까지 성공했다고 판단하지 않는다.
 
 **outputs.tf — 다음 단계에서 사용할 정보**
 
@@ -769,7 +729,7 @@ output "vm_info" {
 예제의 이름·문서용 IP를 실제 테스트 환경의 값으로 바꾼다. 공개 예제는 서로 겹치지 않는 네트워크 4개를 표현하려고 문서용 대역을 `/25`로 나눴다. 실제 환경이 `/24`라면 `ipv4_prefix = 24`와 실제 주소를 함께 넣는다. `255.255.255.0` 문자열을 넣는 자리가 아니다.
 
 !!! warning "기존 코드에서 바꿀 때는 VM 이름을 유지"
-    `variables.tf`, `main.tf`, `outputs.tf`, `lab.tfvars`를 함께 변경하고 `guest-init.sh.tftpl`을 추가한다. 이미 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. NIC·커스터마이징 변경으로 VM 교체가 포함될 수 있다. 기존 계획 파일 대신 새 `tofu plan`으로 대상을 확인한다.
+    `variables.tf`, `main.tf`, `outputs.tf`, `lab.tfvars`를 함께 맞춘다. 공개키·uplink 설정은 main.tf 안에 넣고, 예전 공개키 경로·uplink 변수는 사용하지 않는다. 이미 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. NIC·커스터마이징 변경으로 VM 교체가 포함될 수 있다. 기존 계획 파일 대신 새 `tofu plan`으로 대상을 확인한다.
 
 ```hcl title="lab.tfvars"
 vcenter_server = "vcenter.example.com"
@@ -785,9 +745,6 @@ ipv4_gateway = "192.0.2.1"
 ipv4_prefix  = 25
 dns_servers  = ["192.0.2.53"]
 
-provider_uplink_interface = "ens38"
-ssh_public_key_path       = "/var/lib/gitea-runner/.ssh/id_ed25519.pub"
-
 vms = {
   runner01 = {
     ipv4_addresses = ["192.0.2.101", "198.51.100.101", "203.0.113.101", "203.0.113.201"]
@@ -797,7 +754,7 @@ vms = {
 
 CPU·메모리·디스크 입력은 필요 없다. 예를 들어 템플릿이 16 vCPU·32GiB 메모리·OS 디스크 100GiB라면 같은 사양으로 복제한다. 이 수치는 설명용이며 실제 값은 `tofu plan`에서 조회 결과를 확인한다. 원하는 검증 환경에 필요한 사양은 템플릿에서 먼저 준비한다.
 
-`ssh_public_key_path`는 예제 경로를 그대로 쓰지 말고 실제 `.pub` 파일로 바꾼다. OpenTofu 실행 계정이 그 파일을 읽을 수 있어야 한다. 이미 접속용 공개키가 들어 있는 템플릿이라면 빈 문자열로 두어 키 등록만 생략할 수 있다. 이 경우에도 uplink 초기화는 실행한다.
+Runner의 공개키와 uplink 프로필 이름은 main.tf의 두 고정값만 맞춘다. 이미 같은 공개키가 들어 있으면 중복 추가하지 않는다. SSH 접속에는 그 공개키와 짝이 맞는 Runner의 개인키를 사용한다.
 
 ## 6. 인증과 조회부터 시작
 

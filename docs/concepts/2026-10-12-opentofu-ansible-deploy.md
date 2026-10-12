@@ -69,7 +69,7 @@ OpenTofu는 셸 명령의 내부 동작까지 선언형으로 관리하지 못�
 <div class="section-body" markdown="1">
 
 - 2편의 VM 생성·NIC·고정 IP 설정을 완료한다. VM 이름은 그대로 유지한다.
-- Runner의 공개키가 모든 VM의 `root` 계정에 등록돼 있어야 한다.
+- 2편의 main.tf에 넣은 Runner 공개키가 모든 VM의 `root` 계정에 등록돼 있어야 한다. 이 예제는 키 인증을 사용한다.
 - Runner에서 VM의 관리 IP로 SSH 연결이 가능해야 한다.
 - `runner01`에서 사내 Nexus 다운로드 주소에 접근할 수 있어야 한다.
 - TAR 해제 공간, Nexus 데이터 공간, containerd 이미지 공간을 확보한다.
@@ -84,7 +84,7 @@ command -v bash scp curl tar sha256sum timeout
 
 OpenTofu의 SSH Provisioner는 명령 실행에도 스크립트를 업로드한다. SSH 서버만 있고 `scp`가 없다면 이 과정에서 실패할 수 있다. [SSH 연결과 SCP 조건](https://opentofu.org/docs/v1.10/language/resources/provisioners/connection/#executing-scripts-using-sshscp)
 
-VMware Tools 초기화 스크립트를 사용한 구성에서는 `/var/log/opentofu-guest-init.log`의 `guest-init complete`를 확인한다. 아래 코드는 이 완료 표시까지 기다린다. 다른 초기화 방식을 쓰는 템플릿이라면 그 방식의 준비 완료 조건으로 바꾼다.
+2편의 main.tf에 직접 넣은 `script_text`는 `/var/log/opentofu-guest-init.log`에 `guest-init complete`를 남긴다. 아래 코드는 이 완료 표시까지 기다린다. VM 초기화를 위한 별도 스크립트 파일은 필요 없다. 다른 초기화 방식을 쓰는 템플릿이라면 그 방식의 준비 완료 조건으로 바꾼다.
 
 </div>
 
@@ -511,7 +511,7 @@ ansible-playbook -i inventory/inventory.ini main.yml
 
 ## 6. 실행하고 결과 확인하기
 
-`lab.tfvars`에 아래 입력을 추가한다. 실제 Nexus URL과 Runner의 개인키 경로로 바꾼다. 개인키는 2편에서 VM에 등록한 공개키와 짝이 맞아야 한다.
+`lab.tfvars`에 아래 입력을 추가한다. 실제 Nexus URL과 Runner의 개인키 경로로 바꾼다. `ssh_private_key_path`는 2편 main.tf의 고정 공개키와 짝이 맞는 개인키 파일 경로다. 공개키는 VM에 등록하고, 개인키는 Runner에만 둔다.
 
 ```hcl title="lab.tfvars — 배포 입력 추가"
 deploy_vm_name       = "runner01"
