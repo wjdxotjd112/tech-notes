@@ -169,7 +169,7 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 | Virtual machine → Change Configuration | Change Settings | VM의 일반 구성 변경 |
 | Virtual machine → Change Configuration | Modify device settings | 템플릿에서 이어받은 가상 장치의 설정 변경 |
 | Virtual machine → Change Configuration | Change Swapfile Placement | Provider가 기본 swap 배치 정책 설정 |
-| Virtual machine → Change Configuration | Extend virtual disk | 원본보다 큰 디스크를 지정할 때 필요. 뒤의 여러 VM 예제에서 사용 |
+| Virtual machine → Change Configuration | Extend virtual disk | 디스크를 원본보다 확장할 때만 선택. 기본 예제는 템플릿 크기를 그대로 사용 |
 | Virtual machine → Interaction | Power on | 복제·설정 후 VM 부팅 |
 | Virtual machine → Interaction | Power off | 전원 종료가 필요한 변경·삭제 |
 | Resource | Assign virtual machine to resource pool | 목적지 Resource Pool에 VM 배치. Host 설정 변경 권한은 아님 |
@@ -183,7 +183,7 @@ Role 이름은 예를 들어 **`OpenTofu`**로 정하고, VM·자원 배치·스
 
 `Deploy template`과 `Clone template`은 다르다. 이 실습은 **템플릿 → 일반 VM**이므로 `Deploy template`을 사용한다. 새 템플릿을 만드는 권한은 선택하지 않는다. [vSphere API: CloneVM_Task의 권한 조건](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#clone)
 
-뒤의 여러 VM 예제는 디스크 크기를 다르게 지정하므로 원본보다 큰 VM에는 `Extend virtual disk`가 필요하다. `nested_hv_enabled`와 `extra_config`는 서로 다른 설정이므로 같은 것으로 취급하지 않는다. [vSphere API: ReconfigVM_Task의 항목별 권한](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#reconfigure)
+뒤의 예제는 템플릿의 CPU·메모리·디스크 크기를 그대로 읽어 사용한다. 디스크 확장 권한은 기본 복제와 구분하고 실제 확장할 때만 추가한다. `nested_hv_enabled`와 `extra_config`는 서로 다른 설정이므로 같은 것으로 취급하지 않는다. [vSphere API: ReconfigVM_Task의 항목별 권한](https://developer.broadcom.com/xapis/vsphere-web-services-api/latest/vim.VirtualMachine.html#reconfigure)
 
 `Change Swapfile Placement`는 Rocky 내부의 swap 파티션을 만드는 권한이 아니다. VMware가 사용하는 VM swap 파일의 배치 정책이며, 이 Provider는 기본값도 설정하므로 직접 HCL에 쓰지 않아도 권한이 필요하다. 또한 태그와 커스터마이징·전원 이벤트를 조회하므로 읽기 접근도 유지해야 한다. **태그를 읽기 위해 태그 생성·수정 권한을 일괄 선택하지는 않는다.** [Provider 2.17.1의 추가 권한 안내](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/index.md#notes-on-required-privileges)
 
@@ -310,7 +310,7 @@ ip -br -4 address
 
 `ens38`처럼 번호가 건너뛰는 이름 자체는 문제가 아니다. 복제 코드의 NIC·Port group 선언 순서를 실제 가상 장치 순서에 맞춘다. 게스트 IP 설정도 같은 순서를 따른다. **빈 `network_interface {}`는 IP 미설정이 아니라 DHCP 요청**이므로 IP 없이 사용할 인터페이스와 구분해야 한다. [Provider의 NIC·IP 설정 순서](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md#network-interface-settings)
 
-뒤의 5번은 NIC 1개·SCSI OS 디스크 1개인 최소 학습 예제다. 여러 NIC·디스크를 가진 이 템플릿에 사용할 때는 장치 정의를 원본 구성에 맞게 확장한다.
+뒤의 5번은 **NIC 1개를 연결하는 최소 학습 예제**다. CPU·메모리와 기본 SCSI 컨트롤러에서 조회한 디스크는 템플릿에서 읽어 사용한다. 여러 NIC를 가진 이 템플릿에 사용할 때는 Port group 연결과 IP 설정 블록을 원본의 장치 순서에 맞게 확장한다.
 
 </div>
 
@@ -421,6 +421,19 @@ cd ~/opentofu-learning/vmware-lab
 
 아래 여섯 파일을 같은 디렉터리에 작성한다. 예제는 vSphere Provider **2.17.1**로 고정한다. 이 버전의 공식 문서는 vSphere 8.x·9.x 지원을 안내한다. 기존 vCenter가 그보다 오래됐다면 해당 환경을 지원하는 Provider 문서를 기준으로 버전을 선택한다. [Provider 릴리스](https://github.com/vmware/terraform-provider-vsphere/releases/tag/v2.17.1)
 
+**VM 사양은 템플릿을 재사용하고, VM마다 이름·IP만 지정한다.** CPU·메모리·디스크 값을 각 VM에 반복해서 적지 않는다. 이름은 `vms`의 key이고, 고정 IP는 해당 항목의 `ipv4_address`다.
+
+| 설정 | 값을 가져오는 곳 |
+| --- | --- |
+| CPU 수·소켓당 코어 수 | 템플릿의 `num_cpus`, `num_cores_per_socket` |
+| 메모리 | 템플릿의 `memory` |
+| 디스크 크기·배치·프로비저닝 | 조회한 템플릿의 `disks` 목록 |
+| 호스트명·고정 IP | `vms`의 이름과 `ipv4_address` |
+| IPv4 prefix | 공통 변수 `ipv4_prefix`, 기본값 `24` |
+| 중첩 가상화 | 공통 변수 `nested_hv`, 기본값 `false` |
+
+이 방식은 위의 사양을 **조회한 값으로 명시하는 것**이다. OpenTofu의 사양 설정을 생략하면 템플릿 값을 모두 자동 상속한다는 뜻은 아니다. [템플릿에서 읽을 수 있는 속성](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md#attribute-reference)
+
 **versions.tf — 실행 파일과 Provider의 버전**
 
 ```hcl title="versions.tf"
@@ -497,14 +510,19 @@ variable "dns_servers" {
   type = list(string)
 }
 
+variable "ipv4_prefix" {
+  type    = number
+  default = 24
+}
+
+variable "nested_hv" {
+  type    = bool
+  default = false
+}
+
 variable "vms" {
   type = map(object({
-    cpus         = number
-    memory_mb    = number
-    disk_gib     = number
     ipv4_address = string
-    ipv4_prefix  = number
-    nested_hv    = optional(bool, false)
   }))
 
   validation {
@@ -554,23 +572,29 @@ resource "vsphere_virtual_machine" "vm" {
   resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
   datastore_id     = data.vsphere_datastore.storage.id
 
-  num_cpus          = each.value.cpus
-  memory            = each.value.memory_mb
-  guest_id          = data.vsphere_virtual_machine.template.guest_id
-  firmware          = data.vsphere_virtual_machine.template.firmware
-  scsi_type         = data.vsphere_virtual_machine.template.scsi_type
-  nested_hv_enabled = each.value.nested_hv
+  num_cpus             = data.vsphere_virtual_machine.template.num_cpus
+  num_cores_per_socket = data.vsphere_virtual_machine.template.num_cores_per_socket
+  memory               = data.vsphere_virtual_machine.template.memory
+  guest_id             = data.vsphere_virtual_machine.template.guest_id
+  firmware             = data.vsphere_virtual_machine.template.firmware
+  scsi_type            = data.vsphere_virtual_machine.template.scsi_type
+  nested_hv_enabled    = var.nested_hv
 
   network_interface {
     network_id   = data.vsphere_network.management.id
     adapter_type = data.vsphere_virtual_machine.template.network_interface_types[0]
   }
 
-  disk {
-    label            = "disk0"
-    size             = each.value.disk_gib
-    thin_provisioned = data.vsphere_virtual_machine.template.disks[0].thin_provisioned
-    eagerly_scrub    = data.vsphere_virtual_machine.template.disks[0].eagerly_scrub
+  dynamic "disk" {
+    for_each = data.vsphere_virtual_machine.template.disks
+
+    content {
+      label            = "disk${disk.key}"
+      unit_number      = disk.value.unit_number
+      size             = disk.value.size
+      thin_provisioned = disk.value.thin_provisioned
+      eagerly_scrub    = disk.value.eagerly_scrub
+    }
   }
 
   clone {
@@ -588,7 +612,7 @@ resource "vsphere_virtual_machine" "vm" {
 
       network_interface {
         ipv4_address = each.value.ipv4_address
-        ipv4_netmask = each.value.ipv4_prefix
+        ipv4_netmask = var.ipv4_prefix
       }
 
       ipv4_gateway    = var.ipv4_gateway
@@ -597,25 +621,24 @@ resource "vsphere_virtual_machine" "vm" {
   }
 
   wait_for_guest_net_timeout = 10
-
-  lifecycle {
-    precondition {
-      condition     = each.value.disk_gib >= data.vsphere_virtual_machine.template.disks[0].size
-      error_message = "VM 디스크는 원본 템플릿 디스크보다 작게 만들 수 없다."
-    }
-  }
 }
 ```
 
 학습 예제에서 중요한 연결은 다음과 같다.
 
 - `template.id`는 템플릿 UUID다. 이름으로 조회해 얻은 값을 clone에 전달한다.
+- `num_cpus`, `num_cores_per_socket`, `memory`는 조회한 템플릿 사양을 사용한다.
+- `dynamic "disk"`는 조회한 디스크마다 `disk` 블록을 만들어 크기·SCSI 장치 번호·프로비저닝을 맞춘다. OS 디스크 하나뿐이면 블록도 하나다.
 - `cluster.resource_pool_id`로 VM이 사용할 자원 pool을 선택한다.
 - VM 바깥 `network_interface`는 **가상 NIC를 Port group에 연결**한다.
 - `customize` 안의 `network_interface`는 **Rocky 내부 IP를 설정**한다. 여러 NIC를 쓰면 선언 순서를 맞춰야 한다.
 - `firmware`, `guest_id`, `scsi_type`는 템플릿 값을 따른다. EFI 템플릿을 BIOS로 만드는 실수를 피한다.
 - `linked_clone = false`는 Full Clone이다. 복제 후 디스크가 원본 snapshot에 의존하지 않도록 시작한다.
 - clone·customization·guest network timeout은 서로 다른 대기 단계이며 단위는 분이다.
+
+디스크 예제는 템플릿의 SCSI 디스크가 기본 컨트롤러 하나에 있는 구성을 기준으로 한다. 컨트롤러가 여러 개면 data source의 조회 범위와 리소스의 컨트롤러 개수도 맞춰야 한다. NIC는 위 코드에서 한 개만 연결하므로 다중 NIC 템플릿에 그대로 적용하지 않는다.
+
+`customize`는 유지한다. 템플릿 사양을 재사용하는 것과, 복제 VM의 호스트명·IP를 새로 설정하는 것은 별개다. 공개키 자동 등록은 4-2의 `script_text`를 기존 `linux_options`에 추가한다.
 
 조회할 템플릿 속성은 [VM data source](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/data-sources/virtual_machine.md), 복제와 커스터마이징 옵션은 [VM resource](https://github.com/vmware/terraform-provider-vsphere/blob/v2.17.1/docs/resources/virtual_machine.md)를 참고한다.
 
@@ -637,7 +660,10 @@ output "vm_info" {
 
 **lab.tfvars — 먼저 VM 한 대**
 
-예제의 이름·문서용 IP를 실제 테스트 환경의 값으로 바꾼다. prefix는 `24`처럼 넣는다. `255.255.255.0` 문자열을 넣는 자리가 아니다.
+예제의 이름·문서용 IP를 실제 테스트 환경의 값으로 바꾼다. 공통 prefix는 `24`처럼 넣는다. `255.255.255.0` 문자열을 넣는 자리가 아니다.
+
+!!! warning "기존 코드에서 바꿀 때는 VM 이름을 유지"
+    `variables.tf`, `main.tf`, `lab.tfvars`를 함께 변경한다. 이미 `deploy-01` 등 다른 key로 만든 VM이 있으면 예제의 `runner01`로 바꾸지 말고 기존 key를 유지한다. 변경 전 저장한 계획 파일은 사용하지 않고 새 `tofu plan`으로 삭제·교체 대상을 확인한다.
 
 ```hcl title="lab.tfvars"
 vcenter_server = "vcenter.example.com"
@@ -651,20 +677,15 @@ vm_folder       = "Lab/opentofu"
 
 domain       = "lab.example.com"
 ipv4_gateway = "192.0.2.1"
+ipv4_prefix  = 24
 dns_servers  = ["192.0.2.53"]
 
 vms = {
-  deploy-01 = {
-    cpus         = 2
-    memory_mb    = 4096
-    disk_gib     = 40
-    ipv4_address = "192.0.2.101"
-    ipv4_prefix  = 24
-  }
+  runner01 = { ipv4_address = "192.0.2.101" }
 }
 ```
 
-40GiB 디스크는 템플릿의 원본 디스크가 40GiB 이하일 때 사용할 예다. Nexus·OpenStack 검증에 필요한 디스크와 메모리는 별도로 산정한다.
+CPU·메모리·디스크 입력은 필요 없다. 예를 들어 템플릿이 16 vCPU·32GiB 메모리·OS 디스크 100GiB라면 같은 사양으로 복제한다. 이 수치는 설명용이며 실제 값은 `tofu plan`에서 조회 결과를 확인한다. 원하는 검증 환경에 필요한 사양은 템플릿에서 먼저 준비한다.
 
 ## 6. 인증과 조회부터 시작
 
@@ -712,38 +733,20 @@ systemctl is-active vmtoolsd
 
 Provider의 완료 대기는 SSH 서버·Nexus·OpenStack 서비스의 준비 완료까지 보장하지 않는다. 다음 설치 단계에서는 해당 서비스의 준비 여부를 따로 확인한다.
 
-## 7. 여러 VM과 역할별 사양
+## 7. 같은 템플릿으로 VM 여러 대 생성
 
-VM 한 대가 정상 복제된 뒤 `lab.tfvars`의 `vms`에 항목을 추가한다. 아래는 기존 deploy를 유지하고 controller와 compute를 추가하는 예시다.
+VM 한 대가 정상 복제된 뒤 `lab.tfvars`의 `vms`에 항목을 추가한다. 아래는 기존 `runner01`을 유지하고 `runner02`~`runner04`를 추가하는 예시다. 모두 같은 템플릿 사양을 사용한다.
 
 ```hcl title="lab.tfvars — vms 부분 교체"
 vms = {
-  deploy-01 = {
-    cpus         = 2
-    memory_mb    = 4096
-    disk_gib     = 40
-    ipv4_address = "192.0.2.101"
-    ipv4_prefix  = 24
-  }
-  controller-01 = {
-    cpus         = 4
-    memory_mb    = 8192
-    disk_gib     = 60
-    ipv4_address = "192.0.2.102"
-    ipv4_prefix  = 24
-  }
-  compute-01 = {
-    cpus         = 4
-    memory_mb    = 8192
-    disk_gib     = 80
-    ipv4_address = "192.0.2.103"
-    ipv4_prefix  = 24
-    nested_hv    = true
-  }
+  runner01 = { ipv4_address = "192.0.2.101" }
+  runner02 = { ipv4_address = "192.0.2.102" }
+  runner03 = { ipv4_address = "192.0.2.103" }
+  runner04 = { ipv4_address = "192.0.2.104" }
 }
 ```
 
-これは役割별 입력을 설명하는 사양이다. OpenStack 전체 기능을 시험할 때는 NIC·디스크·메모리 요구사항을 해당 Ansible 구성에 맞춰 늘린다.
+VM 이름만으로 역할이 자동 지정되지는 않는다. 첫 번째 Deploy Node 등 역할 구분은 이후 배포 단계에서 이름을 기준으로 연결한다. 이 예제는 모든 VM의 사양을 동일하게 유지한다.
 
 ```bash
 tofu plan -var-file=lab.tfvars -out=expand.tfplan
@@ -751,9 +754,15 @@ tofu show expand.tfplan
 tofu apply expand.tfplan
 ```
 
-`for_each`는 이름을 식별 key로 쓴다. `compute-02`를 추가하면 그 항목이 생성 대상이 된다. 기존 key를 삭제하면 해당 VM은 삭제 대상이고, key를 바꾸면 기존 객체 삭제와 새 객체 생성으로 해석될 수 있다. 단순 이름 변경과 코드 식별자 변경을 혼동하지 않는다. [for_each](https://opentofu.org/docs/language/meta-arguments/for_each/)
+`for_each`는 이름을 식별 key로 쓴다. `runner05`를 추가하면 그 항목이 생성 대상이 된다. 기존 key를 삭제하면 해당 VM은 삭제 대상이고, key를 바꾸면 기존 객체 삭제와 새 객체 생성으로 해석될 수 있다. 단순 이름 변경과 코드 식별자 변경을 혼동하지 않는다. [for_each](https://opentofu.org/docs/language/meta-arguments/for_each/)
 
-Compute VM 안에서 다시 KVM 인스턴스를 실행하려면 중첩 가상화가 필요하다. `nested_hv_enabled`는 가상화 기능을 게스트에 노출하는 설정이며, 물리 CPU·ESXi·VM 구성도 이를 지원해야 한다. 게스트에서 확인한다.
+Compute VM 안에서 다시 KVM 인스턴스를 실행하려면 중첩 가상화가 필요하다. 네 VM이 모두 Compute 역할을 겸한다면 `lab.tfvars`에 다음 공통값을 추가한다.
+
+```hcl title="lab.tfvars — 중첩 가상화가 필요한 경우 추가"
+nested_hv = true
+```
+
+`nested_hv_enabled`는 가상화 기능을 게스트에 노출하는 설정이며, 물리 CPU·ESXi·VM 구성도 이를 지원해야 한다. 이 값은 템플릿의 CPU·메모리 조회와 별도로 코드에서 명시한다. 게스트에서 확인한다.
 
 ```bash
 lscpu | grep -E 'Virtualization|Hypervisor'
@@ -791,7 +800,9 @@ DHCP 서버가 없는 네트워크에서는 이 방식만으로 주소가 생기
 tofu plan -var-file=lab.tfvars
 ```
 
-변경이 없다면 계획에도 추가 작업이 없어야 한다. CPU·메모리·디스크·커스터마이징 값을 바꿨을 때는 재구성인지 VM 교체인지 확인한다. 가상 디스크를 늘려도 Rocky의 partition·LVM·파일시스템 확장은 따로 필요할 수 있다.
+변경이 없다면 계획에도 추가 작업이 없어야 한다. 이 예제는 매번 템플릿 사양을 조회하므로 **같은 템플릿의 CPU·메모리·디스크를 바꾸면 기존 VM의 계획에도 영향**을 줄 수 있다. IP·템플릿 경로 등 clone 설정 변경은 VM 교체를 유발할 수 있으므로 `tofu show`에서 대상을 확인한다. 복제 기준을 유지하려면 `base-v1`, `base-v2`처럼 템플릿을 구분한다.
+
+VM별 CPU·메모리·디스크 입력을 없앴으므로 예전 `cpus`, `memory_mb`, `disk_gib` 값은 `lab.tfvars`에서 제거한다. 이후 별도로 디스크를 확장하더라도 Rocky의 partition·LVM·파일시스템 확장은 따로 필요할 수 있다.
 
 **중간에 실패**
 
