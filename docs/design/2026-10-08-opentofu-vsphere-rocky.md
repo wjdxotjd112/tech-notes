@@ -987,7 +987,7 @@ IP 대기 timeout만 늘려서 해결하려고 하지 않는다. NIC 연결 문�
 
 ## 10. Ansible·릴리스 검증으로 연결
 
-이어지는 [OpenTofu 입문 가이드 - 3](../concepts/2026-10-12-opentofu-ansible-deploy.md)에서는 첫 VM의 TAR 다운로드·해제, deploy.sh 실행, 컨테이너 기동 후 설정 파일 전달, Ansible 실행을 연결한다.
+이어지는 [OpenTofu 입문 가이드 - 3](../concepts/2026-10-12-opentofu-ansible-deploy.md)에서는 VM 4대의 SSH 준비 확인, 첫 VM의 TAR 다운로드·해제, deploy.sh 실행, Ansible 실행을 연결한다. inventory와 main.yml은 TAR에 미리 준비된 파일을 그대로 사용한다.
 
 VM 생성 이후 결과를 JSON으로 내보내면 다음 단계가 읽기 쉽다.
 
@@ -995,7 +995,7 @@ VM 생성 이후 결과를 JSON으로 내보내면 다음 단계가 읽기 쉽�
 tofu output -json vm_info > vm-info.json
 ```
 
-다음 단계는 이름별 VM IP를 Ansible inventory의 Deploy·Controller·Compute 그룹으로 연결한다. VMware Tools가 보고한 IP와 실제 SSH 연결을 확인한 뒤 설치를 시작한다.
+TAR 안의 Ansible inventory에는 Deploy·Controller·Compute 등의 역할과 고정 IP를 준비한다. OpenTofu의 VM IP도 같은 값으로 지정하고, 실제 SSH 연결을 확인한 뒤 설치를 시작한다. Runner에서 inventory를 생성하거나 복사할 필요는 없다.
 
 <figure class="flow" aria-label="VM 생성 이후 배포 검증으로 이어지는 흐름">
   <ol><li>OpenTofu VM 생성</li><li>IP·SSH 준비 확인</li><li>Ansible 설치·기능 시험</li><li>로그 수집·VM 삭제</li></ol>
