@@ -303,6 +303,7 @@ unset TF_VAR_nexus_user TF_VAR_nexus_password
 
 ## 7. 참고 자료
 
+- [다음: OpenTofu 입문 가이드 - 4 — 태그 push와 Runner 배포 시험](2026-10-14-opentofu-gitea-runner.md)
 - [OpenTofu 입문 가이드 - 2](../design/2026-10-08-opentofu-vsphere-rocky.md)
 - [terraform_data](https://opentofu.org/docs/v1.10/language/resources/tf-data/)
 - [SSH 연결 설정](https://opentofu.org/docs/v1.10/language/resources/provisioners/connection/)

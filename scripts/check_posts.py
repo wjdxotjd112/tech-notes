@@ -24,6 +24,8 @@ GUIDE_FILES = [
     *sorted((ROOT / "guides").glob("*.md")),
 ]
 PLACEHOLDER_MARKERS = ("{{", "작성 후 삭제", "PLACEHOLDER")
+# Workflow secret references are real syntax, not unfinished prose templates.
+WORKFLOW_SECRET_REF_RE = re.compile(r"\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}")
 SECRET_PATTERNS = (
     (re.compile(r"AKIA[0-9A-Z]{16}"), "aws-access-key"),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private-key"),
@@ -261,8 +263,9 @@ def check_posts(docs: Path) -> list[str]:
             errors.append(f"{rel}: spotlight must be true or false")
         errors.extend(check_summary(path, data, body, docs))
         blob = f"{title or ''}\n{summary or ''}\n{body}"
+        placeholder_blob = WORKFLOW_SECRET_REF_RE.sub("", blob)
         for marker in PLACEHOLDER_MARKERS:
-            if marker in blob:
+            if marker in placeholder_blob:
                 errors.append(f"{rel}: template placeholder remains ({marker})")
         errors.extend(check_links(path, body, docs))
         errors.extend(check_secrets(path, path.read_text(encoding="utf-8")))
@@ -326,6 +329,16 @@ def self_test() -> int:
         (docs / "note.md").write_text("category 없는 일반 페이지\n", encoding="utf-8")
         if check_posts(docs):
             failures.append("non-post page was treated as a post")
+
+        workflow_docs = Path(tmp) / "workflow-secrets"
+        workflow_body = valid_body("개념") + "\n```yaml\nVSPHERE_USER: ${{ secrets.VSPHERE_USER }}\n```\n"
+        workflow_meta = "title: Workflow\nsummary: Secrets 참조\ndate: 2026-10-07\ncategory: 개념\ntags:\n  - Automation\n"
+        write_post(workflow_docs, "notes/2026-10-07-workflow.md", workflow_meta, workflow_body)
+        if check_posts(workflow_docs):
+            failures.append("valid Workflow secret reference was rejected")
+        write_post(workflow_docs, "notes/2026-10-07-workflow.md", workflow_meta, workflow_body + "{{title}}\n")
+        if not check_posts(workflow_docs):
+            failures.append("Workflow secret reference hid a real template placeholder")
 
         cases = {
             "bad-category": (
