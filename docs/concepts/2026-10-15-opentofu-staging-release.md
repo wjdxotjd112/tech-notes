@@ -406,6 +406,7 @@ OpenTofu의 `apply` 성공은 예제에 넣은 설치·시험 명령의 정상 �
 
 ## 8. 참고 자료
 
+- [다음: OpenTofu 입문 가이드 - 6 — OpenStack 기능 시험과 VM 자동 정리](2026-10-15-opentofu-functional-test-cleanup.md)
 - [OpenTofu 입문 가이드 - 3: 첫 VM에서 TAR 설치·Ansible 실행](2026-10-12-opentofu-ansible-deploy.md)
 - [OpenTofu 입문 가이드 - 4: Gitea Runner와 태그 연결](2026-10-14-opentofu-gitea-runner.md)
 - [Nexus Raw Repositories](https://help.sonatype.com/en/raw-repositories.html)
