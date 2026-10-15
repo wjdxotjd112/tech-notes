@@ -1,6 +1,6 @@
 ---
 title: "OpenTofu 입문 가이드 - 6"
-summary: "6편: Private Nexus의 QCOW2로 시험 인스턴스를 만들고 VXLAN·Provider망과 볼륨을 연결한다. 통과한 TAR만 발행하며 성공·실패 모두 시험 VM과 plan을 정리한다."
+summary: "6편: 미리 준비한 QCOW2로 시험 인스턴스를 만들고 VXLAN·Provider망과 볼륨을 연결한다. 통과한 TAR만 발행하며 성공·실패 모두 시험 VM과 plan을 정리한다."
 summary_style: editorial
 date: 2026-10-15
 category: 개념
@@ -15,7 +15,7 @@ tags:
     <div class="editorial-summary-copy">
       <span class="editorial-summary-label">이 구성의 핵심</span>
       <h2 id="editorial-summary-title" class="editorial-summary-title">Ansible 완료 뒤 실제 자원을 만들어 보고, 시험 환경은 결과와 관계없이 정리한다.</h2>
-      <p>VMware VM을 만드는 OpenTofu와, 그 안에 배포한 OpenStack을 시험하는 OpenTofu를 분리한다. Private Nexus의 이미지를 Glance에 올리고 시험 인스턴스 한 대에 VXLAN망·Provider망과 볼륨을 연결한다. Actions에 실행 로그를 남기고 시험 자원과 VM을 순서대로 제거한다.</p>
+      <p>VMware VM을 만드는 OpenTofu와, 그 안에 배포한 OpenStack을 시험하는 OpenTofu를 분리한다. Runner에 미리 준비한 이미지를 Glance에 올리고 시험 인스턴스 한 대에 VXLAN망·Provider망과 볼륨을 연결한다. Actions에 실행 로그를 남기고 시험 자원과 VM을 순서대로 제거한다.</p>
     </div>
   </div>
   <p class="editorial-summary-result"><span><strong>배포 → OpenStack 기능 시험 → 동일 TAR 발행 → 시험 VM 정리</strong>. plan은 삭제하지만 다음 정리와 재실행에 필요한 State는 보존한다.</span></p>
@@ -42,7 +42,7 @@ tags:
   → 첫 VM에서 staging TAR 설치·deploy.sh 실행
   → Nexus·Ansible 컨테이너 실행 확인        ← 배포 전 사전 점검
   → ansible-playbook 실행
-  → Runner가 첫 VM의 Private Nexus에서 QCOW2 다운로드
+  → Runner에 미리 둔 QCOW2 파일 확인
   → Glance 이미지 등록 → VXLAN·Provider망 연결 인스턴스·볼륨 생성
   → OpenStack 시험 자원 정리
       ├─ 시험·정리 성공: 동일 TAR 최종 게시·current 갱신
@@ -69,7 +69,7 @@ OpenStack 기능 시험은 별개다. Ansible이 정상 종료한 뒤 실제 Ope
 | 프로젝트 | 접속 대상 | 생성·삭제 대상 |
 | --- | --- | --- |
 | `contrabass-packaging` | vCenter | OpenStack을 설치할 VMware VM 4대 |
-| `openstack-smoke` | 첫 VM의 Private Nexus·방금 배포한 OpenStack API | 시험 이미지·네트워크·인스턴스·볼륨 |
+| `openstack-smoke` | 방금 배포한 OpenStack API | 시험 이미지·네트워크·인스턴스·볼륨 |
 
 **smoke test**는 핵심 기능이 동작하는지 작은 구성으로 빠르게 확인하는 시험이다. 두 프로젝트의 코드·State를 한 디렉터리에 섞지 않는다. 하나는 시험 인프라, 다른 하나는 그 안의 시험 자원을 관리한다.
 
@@ -85,7 +85,7 @@ OpenStack 기능 시험은 별개다. Ansible이 정상 종료한 뒤 실제 Ope
     ├── lab.auto.tfvars
     ├── .terraform.lock.hcl
     ├── terraform.tfstate
-    ├── noble-qemu-okestro2018.qcow2 # Private Nexus에서 받은 임시 이미지
+    ├── noble-qemu-okestro2018.qcow2 # 미리 준비한 원본 이미지: 유지
     └── smoke.tfplan            # 매번 생성 후 삭제
 ```
 
@@ -93,7 +93,7 @@ OpenStack 기능 시험은 별개다. Ansible이 정상 종료한 뒤 실제 Ope
 
 **이번 시험이 확인하는 범위**
 
-- Private Nexus의 QCOW2 다운로드와 Glance 이미지 등록.
+- Runner에 준비한 QCOW2 파일 확인과 Glance 이미지 등록.
 - Nova Flavor·인스턴스 생성, API 기준 `active` 상태.
 - Neutron VXLAN망·Provider망과 각 서브넷 생성, 인스턴스 NIC 두 개 연결.
 - Cinder 볼륨 부팅과 추가 볼륨 연결·제거.
@@ -142,13 +142,13 @@ Nexus 계정, vCenter 계정, OpenStack 계정은 서로 다르다. Runner에서
 
 <div class="section-body" markdown="1">
 
-이미지는 **사내 Nexus가 아니라 첫 VM에 구성한 Private Nexus**의 다음 경로에서 받는다.
+이미지는 Runner의 다음 경로에 **미리 준비해 둔다.** Workflow에서 이미지를 다운로드하지 않는다.
 
 ```text
-https://<첫-VM-IP>:<Private-Nexus-HTTPS-Port>/repository/raw-hosted/vm-image/noble-qemu-okestro2018.qcow2
+/var/lib/gitea-runner/opentofu/openstack-smoke/noble-qemu-okestro2018.qcow2
 ```
 
-Runner가 QCOW2를 다운로드하고, OpenTofu가 그 로컬 파일을 Glance에 업로드한다. Glance의 기존 이미지를 이름으로 조회하거나 원본 POC 서버의 이미지 파일을 복사하지 않는다. 따라서 이 Raw 파일도 릴리스 manifest에 포함돼 Private Nexus로 반입돼 있어야 한다. [Glance 이미지와 local_file_path](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/images_image_v2.md)
+OpenTofu는 `main.tf`와 같은 디렉터리에 놓인 QCOW2를 `local_file_path`로 읽어 Glance에 업로드한다. Runner 서비스 계정이 파일을 읽을 수 있어야 한다. 아래 예제의 파일명과 일치시켜 두면 Nexus 주소나 이미지 다운로드용 계정 설정은 필요 없다. 프로젝트 경로를 바꿀 때는 QCOW2도 그 프로젝트 디렉터리에 둔다. [Glance 이미지와 local_file_path](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/images_image_v2.md)
 
 네트워크는 **터널망 한 개 + Provider망 한 개**다. `value_specs`의 `provider:network_type`으로 터널망의 종류를 명시하고, 인스턴스의 `network` 블록 두 개로 각각 연결한다. Provider망 예제는 Flat 방식이며 물리망 이름은 실제 Neutron 매핑과 맞춘다. [네트워크 value_specs 설정](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/networking_network_v2.md)
 
@@ -329,15 +329,12 @@ Provider `1.53.0` 예제에서는 `segments` 대신 위 `value_specs`로 네트�
 
 ```bash title="bundle-pipeline.env — 추가 항목"
 OPENSTACK_TEST_DIR=/var/lib/gitea-runner/opentofu/openstack-smoke
-PRIVATE_NEXUS_URL=https://192.0.2.101:55555
 OPENSTACK_AUTH_URL=http://192.0.2.100:5000/v3
 OPENSTACK_USERNAME=admin
 OPENSTACK_PROJECT_NAME=admin
 OPENSTACK_USER_DOMAIN_NAME=Default
 OPENSTACK_PROJECT_DOMAIN_NAME=Default
 ```
-
-`PRIVATE_NEXUS_URL`은 `deploy.sh`로 첫 VM에 올린 Nexus 주소다. 포트는 실제 Private Nexus HTTPS 포트로 맞춘다. 기존 `NEXUS_URL`은 사내 staging·최종 저장소 주소이므로 **서로 덮어쓰지 않는다.** 시험 이미지 다운로드는 Private Nexus의 Raw 읽기가 익명 허용된 패키징 구성을 기준으로 한다. 인증을 켰다면 Private Nexus용 읽기 계정을 따로 전달해야 하며 사내 Nexus의 계정이 자동으로 생기지는 않는다.
 
 비밀번호는 Gitea 저장소의 **설정 → Actions → Secrets**에 `OPENSTACK_PASSWORD`로 등록한다. 시험 배포에서 사용하는 OpenStack 계정 비밀번호이며 서버 root 비밀번호나 Nexus 비밀번호가 아니다.
 
@@ -416,7 +413,6 @@ tofu apply -input=false -no-color deploy.tfplan
           source /etc/gitea-runner-env/bundle-pipeline.env
           source "${BUNDLE_BUILDER_DIR}/common.sh"
           : "${OPENSTACK_TEST_DIR:?Set OPENSTACK_TEST_DIR}"
-          : "${PRIVATE_NEXUS_URL:?Set PRIVATE_NEXUS_URL}"
           : "${OS_PASSWORD:?Set OPENSTACK_PASSWORD secret}"
           test -f "${job_dir}/vm-cleanup.enabled"
 
@@ -431,6 +427,10 @@ tofu apply -input=false -no-color deploy.tfplan
           cd "${OPENSTACK_TEST_DIR}"
           exec 8>.ci.lock
           flock -n 8
+          [[ -r noble-qemu-okestro2018.qcow2 && -s noble-qemu-okestro2018.qcow2 ]] || {
+            echo 'Prepare a readable, non-empty noble-qemu-okestro2018.qcow2 in OPENSTACK_TEST_DIR.' >&2
+            exit 1
+          }
           tofu init -input=false -no-color
           tofu fmt -check
           tofu validate -no-color
@@ -450,7 +450,7 @@ tofu apply -input=false -no-color deploy.tfplan
             echo 'Clean OpenStack test resources'
             tofu destroy -auto-approve -input=false -no-color
             cleanup_result=$?
-            rm -f -- smoke.tfplan noble-qemu-okestro2018.qcow2
+            rm -f -- smoke.tfplan
             if (( cleanup_result != 0 )); then
               echo 'OpenStack cleanup failed; keep State for investigation.' >&2
               if (( result == 0 )); then result=1; fi
@@ -462,9 +462,6 @@ tofu apply -input=false -no-color deploy.tfplan
           trap 'exit 130' INT
           trap 'exit 143' TERM
 
-          curl -kfsSL --retry 3 \
-            "${PRIVATE_NEXUS_URL%/}/repository/raw-hosted/vm-image/noble-qemu-okestro2018.qcow2" \
-            -o noble-qemu-okestro2018.qcow2
           tofu plan -input=false -no-color -out=smoke.tfplan
           tofu apply -input=false -no-color smoke.tfplan
           tofu output -json smoke_result | jq -e \
@@ -479,7 +476,7 @@ tofu apply -input=false -no-color deploy.tfplan
 
 `trap ... EXIT`는 이 셸이 끝날 때 정리 함수를 실행하도록 등록하는 문법이다. plan·apply·결과 확인이 실패해도 OpenStack 시험 자원 삭제를 시도한다. 정리가 성공했다고 원래 시험 실패를 성공으로 바꾸지 않는다.
 
-다운로드 위치는 Runner의 `openstack-smoke` 디렉터리다. `local_file_path`가 이 파일을 읽어 Glance에 올리고 인스턴스를 만든다. 정리 시 Glance 시험 이미지도 destroy 대상에 포함하며, Runner에 받은 QCOW2 파일은 plan과 함께 지운다. **Private Nexus에 저장된 원본 QCOW2는 삭제하지 않는다.** `curl -k`는 기존 자체 서명 인증서 시험 구성을 따른 예시이며, CA 신뢰를 구성한 환경에서는 인증서 검증을 사용한다.
+미리 준비한 QCOW2가 없거나 Runner 계정이 읽을 수 없으면 자원 생성 전에 중단한다. 정리할 때 Glance에 등록한 시험 이미지는 destroy 대상에 포함하지만, **Runner에 준비한 원본 QCOW2는 삭제하지 않는다.** 다음 시험에서도 같은 파일을 재사용한다.
 
 반대로 시험 성공 후 정리가 실패해도 Step을 실패시키고 합격 파일을 지운다. **이 Step 전체가 성공하지 않으면 다음 승격 Step은 실행되지 않는다.** 승격에 `if: always()`나 `continue-on-error`를 추가하지 않는다.
 
@@ -562,7 +559,7 @@ plan은 이번 실행의 변경 계획 파일이다. State는 생성한 자원�
 | --- | --- |
 | `deploy.tfplan`, `smoke.tfplan`, 과거 `*.plan` | 작업 완료 후 삭제. 위 Step은 이번 plan을 자동 정리 |
 | `vm-info.json` | 필요 없다면 삭제. 위 VM 정리 Step에 포함 |
-| Runner의 `noble-qemu-okestro2018.qcow2` | 이번 시험용 다운로드 파일만 삭제. Private Nexus 원본은 유지 |
+| Runner의 `noble-qemu-okestro2018.qcow2` | 미리 준비한 원본이므로 유지. 다음 시험에 재사용 |
 | `terraform.tfstate`, `.backup` | 자동 삭제하지 않음. destroy 실패 시 반드시 보존 |
 | `.terraform/` | Provider 캐시·초기화 정보 유지. 매번 재다운로드하지 않음 |
 | `.terraform.lock.hcl` | 유지·버전 관리 |
@@ -613,7 +610,7 @@ done
 | 확인 위치 | 읽을 내용 |
 | --- | --- |
 | 기존 VM·Ansible Step | VM 4대 생성, 사전 점검, `ansible-playbook` 정상 종료 |
-| `Test OpenStack functions` | QCOW2 다운로드·Glance 등록, NIC 두 개·볼륨 생성, 결과 조건 `true`, OpenStack destroy 정상 종료 |
+| `Test OpenStack functions` | 로컬 QCOW2 확인·Glance 등록, NIC 두 개·볼륨 생성, 결과 조건 `true`, OpenStack destroy 정상 종료 |
 | `Promote tested bundle` | 시험한 SHA256과 같은 TAR 게시, release·current 처리 |
 | `Clean test VMs` | VMware destroy 정상 종료. 일부 생성 실패도 정리 대상 |
 | 마지막 staging 정리 | 이번 후보 TAR와 체크섬만 삭제 |
@@ -621,7 +618,7 @@ done
 처음 연결할 때는 다음 세 경우를 구분해 확인한다.
 
 1. **정상 실행:** 기능 시험 통과 후 최종 게시, OpenStack 자원·VM 삭제, 이번 plan 파일 없음.
-2. **의도적인 시험 실패:** 잘못된 이미지 다운로드 경로 등으로 기능 시험을 실패시켰을 때 승격이 생략되고, VMware VM은 정리되는지 확인.
+2. **의도적인 시험 실패:** 없는 물리망 이름 등 잘못된 시험 설정으로 기능 시험을 실패시켰을 때 승격이 생략되고, VMware VM은 정리되는지 확인. 로컬 QCOW2가 없어 시작하지 못한 경우도 승격하지 않음.
 3. **정리 실패:** 권한·API 오류가 Job 실패로 보이고 State가 보존되는지 확인. 이 경우 다음 실행을 강행하지 않고 남은 자원부터 처리.
 
 Actions에서 보이는 stdout·stderr를 기본 조사 자료로 사용한다. `TF_LOG=DEBUG`, 인증 환경변수 전체 출력, State·plan 전체 덤프는 기본 로그에 추가하지 않는다. VM 안의 상세 로그가 필요하면 **destroy 이전**에 필요한 비밀 제거된 부분을 별도로 수집한다.
