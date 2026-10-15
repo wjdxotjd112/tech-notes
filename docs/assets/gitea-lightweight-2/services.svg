@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="620" viewBox="0 0 560 620" role="img" aria-labelledby="title desc">
+  <title id="title">Gitea·Nexus·호스트 Runner 구성</title>
+  <desc id="desc">한 서버에서 Gitea와 PostgreSQL, Nexus를 containerd 컨테이너로 실행한다. systemd로 실행한 Runner는 Gitea와 작업·로그를 주고받고 Nexus에서 재료를 받아 결과물을 게시한다.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#2563eb"/></marker>
+  </defs>
+  <rect x="10" y="10" width="540" height="600" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+  <g font-family="Pretendard, 'Noto Sans CJK KR', sans-serif" text-anchor="middle">
+    <text x="280" y="48" font-size="24" fill="#0b1f3a" font-weight="600">구축 서버 한 대</text>
+    <rect x="36" y="78" width="260" height="96" rx="8" fill="#fff" stroke="#0b1f3a" stroke-width="2"/>
+    <text x="166" y="116" font-size="27" fill="#0b1f3a" font-weight="600">Gitea</text>
+    <text x="166" y="151" font-size="22" fill="#3d4d63">코드 · Actions / 30000</text>
+    <rect x="350" y="78" width="174" height="96" rx="8" fill="#fff" stroke="#0b1f3a" stroke-width="2"/>
+    <text x="437" y="116" font-size="24" fill="#0b1f3a" font-weight="600">PostgreSQL</text>
+    <text x="437" y="151" font-size="22" fill="#3d4d63">Gitea DB</text>
+    <path d="M302 126H342" stroke="#2563eb" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <path d="M166 184V270" stroke="#2563eb" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="352" y="229" font-size="22" fill="#3d4d63">작업 조회 · 로그 전송</text>
+    <rect x="36" y="282" width="488" height="100" rx="8" fill="#fff" stroke="#0b1f3a" stroke-width="2"/>
+    <text x="280" y="321" font-size="27" fill="#0b1f3a" font-weight="600">Gitea Runner / systemd</text>
+    <text x="280" y="355" font-size="23" fill="#3d4d63">호스트 실행 · 동시 작업 1개</text>
+    <path d="M166 394V474" stroke="#2563eb" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="352" y="438" font-size="22" fill="#3d4d63">재료 수신 · TAR 게시</text>
+    <rect x="36" y="486" width="488" height="94" rx="8" fill="#fff" stroke="#0b1f3a" stroke-width="2"/>
+    <text x="280" y="522" font-size="27" fill="#0b1f3a" font-weight="600">Nexus / HTTPS 55555</text>
+    <text x="280" y="556" font-size="22" fill="#3d4d63">컨테이너 이미지 · Raw 파일 · Bundle</text>
+  </g>
+</svg>
