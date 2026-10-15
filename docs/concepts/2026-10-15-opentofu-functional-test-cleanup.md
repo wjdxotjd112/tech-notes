@@ -1,6 +1,6 @@
 ---
 title: "OpenTofu 입문 가이드 - 6"
-summary: "6편: 배포한 OpenStack에 시험 인스턴스와 볼륨을 만들고, 통과한 TAR만 발행한다. 성공·실패 모두 시험 VM을 정리하고 plan 파일은 남기지 않는다."
+summary: "6편: Private Nexus의 QCOW2로 시험 인스턴스를 만들고 VXLAN·Provider망과 볼륨을 연결한다. 통과한 TAR만 발행하며 성공·실패 모두 시험 VM과 plan을 정리한다."
 summary_style: editorial
 date: 2026-10-15
 category: 개념
@@ -15,7 +15,7 @@ tags:
     <div class="editorial-summary-copy">
       <span class="editorial-summary-label">이 구성의 핵심</span>
       <h2 id="editorial-summary-title" class="editorial-summary-title">Ansible 완료 뒤 실제 자원을 만들어 보고, 시험 환경은 결과와 관계없이 정리한다.</h2>
-      <p>VMware VM을 만드는 OpenTofu와, 그 안에 배포한 OpenStack을 시험하는 OpenTofu를 분리한다. 기능 시험은 모듈 없이 인스턴스 한 대와 볼륨 연결로 시작한다. Actions에 실행 로그를 남기고 시험 자원과 VM을 순서대로 제거한다.</p>
+      <p>VMware VM을 만드는 OpenTofu와, 그 안에 배포한 OpenStack을 시험하는 OpenTofu를 분리한다. Private Nexus의 이미지를 Glance에 올리고 시험 인스턴스 한 대에 VXLAN망·Provider망과 볼륨을 연결한다. Actions에 실행 로그를 남기고 시험 자원과 VM을 순서대로 제거한다.</p>
     </div>
   </div>
   <p class="editorial-summary-result"><span><strong>배포 → OpenStack 기능 시험 → 동일 TAR 발행 → 시험 VM 정리</strong>. plan은 삭제하지만 다음 정리와 재실행에 필요한 State는 보존한다.</span></p>
@@ -40,9 +40,10 @@ tags:
 태그 push → TAR 빌드 → staging 게시
   → VMware VM 4대 생성·SSH 준비 확인
   → 첫 VM에서 staging TAR 설치·deploy.sh 실행
-  → 컨테이너 확인·Ansible ping              ← 배포 전 사전 점검
+  → Nexus·Ansible 컨테이너 실행 확인        ← 배포 전 사전 점검
   → ansible-playbook 실행
-  → OpenStack 시험 인스턴스·볼륨 생성       ← 배포 후 기능 시험
+  → Runner가 첫 VM의 Private Nexus에서 QCOW2 다운로드
+  → Glance 이미지 등록 → VXLAN·Provider망 연결 인스턴스·볼륨 생성
   → OpenStack 시험 자원 정리
       ├─ 시험·정리 성공: 동일 TAR 최종 게시·current 갱신
       └─ 실패: 최종 게시 건너뜀
@@ -50,7 +51,14 @@ tags:
   → staging 후보 정리
 ```
 
-컨테이너 기동 확인과 `ansible.builtin.ping`은 Ansible **앞에 두어도 된다.** ping은 inventory 대상에 SSH로 접속해 Python 모듈이 실행되는지 확인한다. 따라서 이 시점에 SSH 인증과 Python이 준비돼 있어야 한다. [Ansible ping 모듈](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/ping_module.html)
+배포 전에는 두 컨테이너에서 명령을 실행할 수 있는지만 확인한다.
+
+```bash title="배포 전 컨테이너 확인"
+nerdctl exec nexus true
+nerdctl exec okestro-os-ansible true
+```
+
+`ansible.builtin.ping`은 일반 네트워크 ping이 아니라 SSH 인증과 원격 Python 실행이 필요한 모듈이다. SSH 인증을 이후 Ansible 초기 작업에서 준비한다면 사전 점검에 넣지 않는다. 컨테이너 실행 확인만으로 Nexus API나 OpenStack 기능까지 검증되는 것은 아니다. [Ansible ping 모듈](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/ping_module.html)
 
 OpenStack 기능 시험은 별개다. Ansible이 정상 종료한 뒤 실제 OpenStack API로 네트워크·인스턴스·볼륨을 만들어 본다.
 
@@ -61,7 +69,7 @@ OpenStack 기능 시험은 별개다. Ansible이 정상 종료한 뒤 실제 Ope
 | 프로젝트 | 접속 대상 | 생성·삭제 대상 |
 | --- | --- | --- |
 | `contrabass-packaging` | vCenter | OpenStack을 설치할 VMware VM 4대 |
-| `openstack-smoke` | 방금 배포한 OpenStack API | 시험용 네트워크·인스턴스·볼륨 |
+| `openstack-smoke` | 첫 VM의 Private Nexus·방금 배포한 OpenStack API | 시험 이미지·네트워크·인스턴스·볼륨 |
 
 **smoke test**는 핵심 기능이 동작하는지 작은 구성으로 빠르게 확인하는 시험이다. 두 프로젝트의 코드·State를 한 디렉터리에 섞지 않는다. 하나는 시험 인프라, 다른 하나는 그 안의 시험 자원을 관리한다.
 
@@ -77,16 +85,17 @@ OpenStack 기능 시험은 별개다. Ansible이 정상 종료한 뒤 실제 Ope
     ├── lab.auto.tfvars
     ├── .terraform.lock.hcl
     ├── terraform.tfstate
+    ├── noble-qemu-okestro2018.qcow2 # Private Nexus에서 받은 임시 이미지
     └── smoke.tfplan            # 매번 생성 후 삭제
 ```
 
-기존 POC는 이미지 업로드, 이중 네트워크, 여러 인스턴스와 볼륨, Quota 변경을 모듈로 구성했다. 여기서는 **VM 한 대·부팅 볼륨·추가 볼륨 한 개**로 줄인다. Quota나 기본 보안그룹을 바꾸지 않으며, 기존 POC의 State도 가져오지 않는다.
+기존 POC는 이미지 업로드, 이중 네트워크, 여러 인스턴스와 볼륨, Quota 변경을 모듈로 구성했다. 여기서는 이미지 업로드와 이중 네트워크는 유지하고 **VM 한 대·부팅 볼륨·추가 볼륨 한 개**로 줄인다. Quota나 기본 보안그룹을 바꾸지 않으며, 기존 POC의 State도 가져오지 않는다.
 
 **이번 시험이 확인하는 범위**
 
-- Keystone 인증과 Glance의 시험 이미지 조회.
+- Private Nexus의 QCOW2 다운로드와 Glance 이미지 등록.
 - Nova Flavor·인스턴스 생성, API 기준 `active` 상태.
-- Neutron 네트워크·서브넷·인스턴스 NIC 구성.
+- Neutron VXLAN망·Provider망과 각 서브넷 생성, 인스턴스 NIC 두 개 연결.
 - Cinder 볼륨 부팅과 추가 볼륨 연결·제거.
 
 인스턴스 내부의 SSH·파일 읽기/쓰기, 외부망 통신, 고가용성·장애 복구는 이번 합격 기준에 넣지 않는다. API에서 생성·연결됐다고 그 기능까지 시험한 것은 아니다.
@@ -133,19 +142,58 @@ Nexus 계정, vCenter 계정, OpenStack 계정은 서로 다르다. Runner에서
 
 <div class="section-body" markdown="1">
 
-Glance에 이미 등록된 이미지를 읽고, 나머지 시험 자원은 이 프로젝트가 직접 만든다. 이미지 파일을 Runner에 복사하거나 기존 POC의 이미지 업로드 경로를 다시 준비하지 않는다. [인스턴스·볼륨 부팅](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/compute_instance_v2.md), [볼륨 연결](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/compute_volume_attach_v2.md)
+이미지는 **사내 Nexus가 아니라 첫 VM에 구성한 Private Nexus**의 다음 경로에서 받는다.
+
+```text
+https://<첫-VM-IP>:<Private-Nexus-HTTPS-Port>/repository/raw-hosted/vm-image/noble-qemu-okestro2018.qcow2
+```
+
+Runner가 QCOW2를 다운로드하고, OpenTofu가 그 로컬 파일을 Glance에 업로드한다. Glance의 기존 이미지를 이름으로 조회하거나 원본 POC 서버의 이미지 파일을 복사하지 않는다. 따라서 이 Raw 파일도 릴리스 manifest에 포함돼 Private Nexus로 반입돼 있어야 한다. [Glance 이미지와 local_file_path](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/images_image_v2.md)
+
+네트워크는 **터널망 한 개 + Provider망 한 개**다. `value_specs`의 `provider:network_type`으로 터널망의 종류를 명시하고, 인스턴스의 `network` 블록 두 개로 각각 연결한다. Provider망 예제는 Flat 방식이며 물리망 이름은 실제 Neutron 매핑과 맞춘다. [네트워크 value_specs 설정](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/networking_network_v2.md)
 
 <details class="analysis-toggle" markdown="1">
 <summary>main.tf 전체 — 모듈 없이 한 파일로 구성</summary>
 
 ```hcl title="openstack-smoke/main.tf"
-variable "image_name" {
+variable "overlay_network_type" {
+  type = string
+
+  validation {
+    condition     = contains(["vxlan", "geneve"], var.overlay_network_type)
+    error_message = "overlay_network_type must be vxlan or geneve."
+  }
+}
+
+variable "provider_physical_network" {
   type = string
 }
 
-data "openstack_images_image_v2" "test" {
-  name        = var.image_name
-  most_recent = false
+variable "provider_cidr" {
+  type = string
+}
+
+variable "provider_gateway" {
+  type = string
+}
+
+variable "provider_allocation_pool" {
+  type = object({
+    start = string
+    end   = string
+  })
+}
+
+resource "openstack_images_image_v2" "test" {
+  name             = "release-smoke-noble"
+  local_file_path  = "${path.module}/noble-qemu-okestro2018.qcow2"
+  container_format = "bare"
+  disk_format      = "qcow2"
+
+  properties = {
+    hw_qemu_guest_agent = "yes"
+    hw_require_fsfreeze = "yes"
+  }
 }
 
 resource "openstack_compute_flavor_v2" "test" {
@@ -155,17 +203,45 @@ resource "openstack_compute_flavor_v2" "test" {
   disk  = 0
 }
 
-resource "openstack_networking_network_v2" "test" {
-  name = "release-smoke-network"
+resource "openstack_networking_network_v2" "overlay" {
+  name = "release-smoke-overlay"
+
+  value_specs = {
+    "provider:network_type" = var.overlay_network_type
+  }
 }
 
-resource "openstack_networking_subnet_v2" "test" {
-  name        = "release-smoke-subnet"
-  network_id  = openstack_networking_network_v2.test.id
+resource "openstack_networking_subnet_v2" "overlay" {
+  name        = "release-smoke-overlay-subnet"
+  network_id  = openstack_networking_network_v2.overlay.id
   cidr        = "198.51.100.0/24"
   ip_version  = 4
   enable_dhcp = true
   no_gateway  = true
+}
+
+resource "openstack_networking_network_v2" "provider" {
+  name     = "release-smoke-provider"
+  external = true
+
+  value_specs = {
+    "provider:network_type"     = "flat"
+    "provider:physical_network" = var.provider_physical_network
+  }
+}
+
+resource "openstack_networking_subnet_v2" "provider" {
+  name        = "release-smoke-provider-subnet"
+  network_id  = openstack_networking_network_v2.provider.id
+  cidr        = var.provider_cidr
+  ip_version  = 4
+  enable_dhcp = true
+  gateway_ip  = var.provider_gateway
+
+  allocation_pool {
+    start = var.provider_allocation_pool.start
+    end   = var.provider_allocation_pool.end
+  }
 }
 
 resource "openstack_compute_instance_v2" "test" {
@@ -173,7 +249,7 @@ resource "openstack_compute_instance_v2" "test" {
   flavor_id = openstack_compute_flavor_v2.test.id
 
   block_device {
-    uuid                  = data.openstack_images_image_v2.test.id
+    uuid                  = openstack_images_image_v2.test.id
     source_type           = "image"
     destination_type      = "volume"
     volume_size           = 20
@@ -182,10 +258,17 @@ resource "openstack_compute_instance_v2" "test" {
   }
 
   network {
-    uuid = openstack_networking_network_v2.test.id
+    uuid = openstack_networking_network_v2.overlay.id
   }
 
-  depends_on = [openstack_networking_subnet_v2.test]
+  network {
+    uuid = openstack_networking_network_v2.provider.id
+  }
+
+  depends_on = [
+    openstack_networking_subnet_v2.overlay,
+    openstack_networking_subnet_v2.provider,
+  ]
 }
 
 resource "openstack_blockstorage_volume_v3" "test" {
@@ -201,24 +284,40 @@ resource "openstack_compute_volume_attach_v2" "test" {
 output "smoke_result" {
   value = {
     instance_id        = openstack_compute_instance_v2.test.id
+    image_status       = openstack_images_image_v2.test.status
     power_state        = openstack_compute_instance_v2.test.power_state
+    network_ids        = [for nic in openstack_compute_instance_v2.test.network : nic.uuid]
     volume_id          = openstack_blockstorage_volume_v3.test.id
     attached_volume_id = openstack_compute_volume_attach_v2.test.volume_id
   }
 }
 ```
 
-`depends_on`은 서브넷 생성 전에 인스턴스가 만들어지는 것을 막는다. 부팅 볼륨은 인스턴스 제거 시 삭제하고, 추가 볼륨은 연결 해제 후 별도로 삭제하도록 의존 관계가 구성된다.
+`depends_on`은 두 서브넷이 준비된 뒤 인스턴스를 만들도록 한다. 첫 NIC는 터널망, 두 번째 NIC는 Provider망이다. 부팅 볼륨은 인스턴스 제거 시 삭제하고, 추가 볼륨은 연결 해제 후 별도로 삭제하도록 의존 관계가 구성된다.
 
 </details>
 
 ```hcl title="openstack-smoke/lab.auto.tfvars"
-image_name = "cirros-0.6.2"
+overlay_network_type      = "vxlan"
+provider_physical_network = "external"
+provider_cidr             = "203.0.113.0/24"
+provider_gateway          = "203.0.113.1"
+provider_allocation_pool = {
+  start = "203.0.113.151"
+  end   = "203.0.113.160"
+}
 ```
 
-이미지 이름은 예시다. **Ansible 배포로 Glance에 등록되는 실제 시험 이미지 이름**으로 맞춘다. 이미지가 없거나 중복되면 조회 단계에서 실패하게 두고, 이름을 추측해 계속 진행하지 않는다. 부팅 볼륨 20GiB와 Flavor도 이미지의 최소 요구 사양에 맞춘다.
+IP와 물리망 이름은 예시다. `external`은 Neutron의 물리망 식별자이며, 네트워크 표시 이름이나 NIC 이름이 아니다. 실제 브리지 매핑·외부망 CIDR·게이트웨이에 맞추고 **시험 전용으로 예약한 IP만 할당 풀에 넣는다.** 예제는 Provider망에서 DHCP를 사용하므로 실제 네트워크의 DHCP 운영과 충돌하지 않는 구간이어야 한다. 부팅 볼륨 20GiB와 Flavor도 QCOW2 이미지의 최소 요구 사양에 맞춘다.
 
-이번 구성은 관리자 권한이 필요한 Flavor 생성까지 포함한다. 시험 클러스터 전용 계정으로 실행하며 운영 OpenStack에 연결하지 않는다.
+현재는 `overlay_network_type = "vxlan"`을 사용한다. OVN으로 전환한 뒤에는 `geneve`로 바꿀 수 있지만, **이 변수만 바꾼다고 OpenStack이 OVN 구조로 전환되는 것은 아니다.** Neutron 백엔드·터널 종류·할당 범위가 먼저 해당 유형을 지원해야 한다. 터널 ID는 별도로 고정하지 않고 Neutron의 구성된 범위에서 할당받는다. [Neutron ML2 설정](https://docs.openstack.org/neutron/2025.1/configuration/samples/ml2-conf.html)
+
+Provider `1.53.0` 예제에서는 `segments` 대신 위 `value_specs`로 네트워크 유형만 전달한다. 지정하지 않은 터널 ID를 `0`으로 보내는 상황을 피하고 Neutron이 ID를 할당하도록 하기 위한 구성이다. [Provider 요청 구성](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/openstack/types.go)
+
+!!! warning "Provider망 생성 범위"
+    예제는 이번 시험용 Provider망도 새로 생성·삭제한다. 같은 물리망에 Flat Provider망이 이미 있으면 새로 만들 수 없는 구성이 있으므로 기존 망을 중복 생성하지 않는다. 기존 망을 재사용할 때는 해당 망을 data source로 조회하고, 시험 State가 기존 망을 삭제 대상으로 소유하지 않도록 별도로 맞춘다.
+
+이번 구성은 관리자 권한이 필요한 Flavor·Provider망 생성까지 포함한다. 시험 클러스터 전용 계정으로 실행하며 운영 OpenStack에 연결하지 않는다.
 
 </div>
 
@@ -230,12 +329,15 @@ image_name = "cirros-0.6.2"
 
 ```bash title="bundle-pipeline.env — 추가 항목"
 OPENSTACK_TEST_DIR=/var/lib/gitea-runner/opentofu/openstack-smoke
+PRIVATE_NEXUS_URL=https://192.0.2.101:55555
 OPENSTACK_AUTH_URL=http://192.0.2.100:5000/v3
 OPENSTACK_USERNAME=admin
 OPENSTACK_PROJECT_NAME=admin
 OPENSTACK_USER_DOMAIN_NAME=Default
 OPENSTACK_PROJECT_DOMAIN_NAME=Default
 ```
+
+`PRIVATE_NEXUS_URL`은 `deploy.sh`로 첫 VM에 올린 Nexus 주소다. 포트는 실제 Private Nexus HTTPS 포트로 맞춘다. 기존 `NEXUS_URL`은 사내 staging·최종 저장소 주소이므로 **서로 덮어쓰지 않는다.** 시험 이미지 다운로드는 Private Nexus의 Raw 읽기가 익명 허용된 패키징 구성을 기준으로 한다. 인증을 켰다면 Private Nexus용 읽기 계정을 따로 전달해야 하며 사내 Nexus의 계정이 자동으로 생기지는 않는다.
 
 비밀번호는 Gitea 저장소의 **설정 → Actions → Secrets**에 `OPENSTACK_PASSWORD`로 등록한다. 시험 배포에서 사용하는 OpenStack 계정 비밀번호이며 서버 root 비밀번호나 Nexus 비밀번호가 아니다.
 
@@ -297,7 +399,7 @@ tofu apply -input=false -no-color deploy.tfplan
 
 <div class="section-body" markdown="1">
 
-아래 Step을 **기존 VM·Ansible 시험 다음, 승격 이전**에 추가한다. 전용 프로젝트의 로컬 Backend·기본 workspace를 사용하고, Runner 동시 Job 수 1개를 유지한다. 수동 실행도 `.ci.lock`을 함께 사용하며 CI와 동시에 실행하지 않는다.
+아래 Step을 **기존 VM·Ansible 시험 다음, 승격 이전**에 추가한다. 전용 프로젝트의 로컬 Backend·기본 workspace를 사용하고, Runner 동시 Job 수 1개를 유지한다. 수동 실행도 `.ci.lock`을 함께 사용하며 CI와 동시에 실행하지 않는다. 이미 이전 버전의 Step을 추가했다면 새로 중복 추가하지 않고 해당 Step을 아래 내용으로 교체한다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>Test OpenStack functions — 시험과 OpenStack 자원 정리</summary>
@@ -314,6 +416,7 @@ tofu apply -input=false -no-color deploy.tfplan
           source /etc/gitea-runner-env/bundle-pipeline.env
           source "${BUNDLE_BUILDER_DIR}/common.sh"
           : "${OPENSTACK_TEST_DIR:?Set OPENSTACK_TEST_DIR}"
+          : "${PRIVATE_NEXUS_URL:?Set PRIVATE_NEXUS_URL}"
           : "${OS_PASSWORD:?Set OPENSTACK_PASSWORD secret}"
           test -f "${job_dir}/vm-cleanup.enabled"
 
@@ -347,7 +450,7 @@ tofu apply -input=false -no-color deploy.tfplan
             echo 'Clean OpenStack test resources'
             tofu destroy -auto-approve -input=false -no-color
             cleanup_result=$?
-            rm -f -- smoke.tfplan
+            rm -f -- smoke.tfplan noble-qemu-okestro2018.qcow2
             if (( cleanup_result != 0 )); then
               echo 'OpenStack cleanup failed; keep State for investigation.' >&2
               if (( result == 0 )); then result=1; fi
@@ -359,10 +462,15 @@ tofu apply -input=false -no-color deploy.tfplan
           trap 'exit 130' INT
           trap 'exit 143' TERM
 
+          curl -kfsSL --retry 3 \
+            "${PRIVATE_NEXUS_URL%/}/repository/raw-hosted/vm-image/noble-qemu-okestro2018.qcow2" \
+            -o noble-qemu-okestro2018.qcow2
           tofu plan -input=false -no-color -out=smoke.tfplan
           tofu apply -input=false -no-color smoke.tfplan
           tofu output -json smoke_result | jq -e \
-            '.power_state == "active" and (.volume_id == .attached_volume_id)'
+            '.image_status == "active" and .power_state == "active"
+             and (.network_ids | length) == 2
+             and (.volume_id == .attached_volume_id)'
 
           sha="$(yaml_value "${job_dir}/staging-info.yaml" bundle_sha256)"
           [[ "${sha}" =~ ^[0-9a-f]{64}$ ]]
@@ -370,6 +478,8 @@ tofu apply -input=false -no-color deploy.tfplan
 ```
 
 `trap ... EXIT`는 이 셸이 끝날 때 정리 함수를 실행하도록 등록하는 문법이다. plan·apply·결과 확인이 실패해도 OpenStack 시험 자원 삭제를 시도한다. 정리가 성공했다고 원래 시험 실패를 성공으로 바꾸지 않는다.
+
+다운로드 위치는 Runner의 `openstack-smoke` 디렉터리다. `local_file_path`가 이 파일을 읽어 Glance에 올리고 인스턴스를 만든다. 정리 시 Glance 시험 이미지도 destroy 대상에 포함하며, Runner에 받은 QCOW2 파일은 plan과 함께 지운다. **Private Nexus에 저장된 원본 QCOW2는 삭제하지 않는다.** `curl -k`는 기존 자체 서명 인증서 시험 구성을 따른 예시이며, CA 신뢰를 구성한 환경에서는 인증서 검증을 사용한다.
 
 반대로 시험 성공 후 정리가 실패해도 Step을 실패시키고 합격 파일을 지운다. **이 Step 전체가 성공하지 않으면 다음 승격 Step은 실행되지 않는다.** 승격에 `if: always()`나 `continue-on-error`를 추가하지 않는다.
 
@@ -452,6 +562,7 @@ plan은 이번 실행의 변경 계획 파일이다. State는 생성한 자원�
 | --- | --- |
 | `deploy.tfplan`, `smoke.tfplan`, 과거 `*.plan` | 작업 완료 후 삭제. 위 Step은 이번 plan을 자동 정리 |
 | `vm-info.json` | 필요 없다면 삭제. 위 VM 정리 Step에 포함 |
+| Runner의 `noble-qemu-okestro2018.qcow2` | 이번 시험용 다운로드 파일만 삭제. Private Nexus 원본은 유지 |
 | `terraform.tfstate`, `.backup` | 자동 삭제하지 않음. destroy 실패 시 반드시 보존 |
 | `.terraform/` | Provider 캐시·초기화 정보 유지. 매번 재다운로드하지 않음 |
 | `.terraform.lock.hcl` | 유지·버전 관리 |
@@ -502,7 +613,7 @@ done
 | 확인 위치 | 읽을 내용 |
 | --- | --- |
 | 기존 VM·Ansible Step | VM 4대 생성, 사전 점검, `ansible-playbook` 정상 종료 |
-| `Test OpenStack functions` | 시험 자원 생성, 결과 조건 `true`, OpenStack destroy 정상 종료 |
+| `Test OpenStack functions` | QCOW2 다운로드·Glance 등록, NIC 두 개·볼륨 생성, 결과 조건 `true`, OpenStack destroy 정상 종료 |
 | `Promote tested bundle` | 시험한 SHA256과 같은 TAR 게시, release·current 처리 |
 | `Clean test VMs` | VMware destroy 정상 종료. 일부 생성 실패도 정리 대상 |
 | 마지막 staging 정리 | 이번 후보 TAR와 체크섬만 삭제 |
@@ -510,7 +621,7 @@ done
 처음 연결할 때는 다음 세 경우를 구분해 확인한다.
 
 1. **정상 실행:** 기능 시험 통과 후 최종 게시, OpenStack 자원·VM 삭제, 이번 plan 파일 없음.
-2. **의도적인 시험 실패:** 존재하지 않는 이미지 이름 등으로 기능 시험을 실패시켰을 때 승격이 생략되고, VMware VM은 정리되는지 확인.
+2. **의도적인 시험 실패:** 잘못된 이미지 다운로드 경로 등으로 기능 시험을 실패시켰을 때 승격이 생략되고, VMware VM은 정리되는지 확인.
 3. **정리 실패:** 권한·API 오류가 Job 실패로 보이고 State가 보존되는지 확인. 이 경우 다음 실행을 강행하지 않고 남은 자원부터 처리.
 
 Actions에서 보이는 stdout·stderr를 기본 조사 자료로 사용한다. `TF_LOG=DEBUG`, 인증 환경변수 전체 출력, State·plan 전체 덤프는 기본 로그에 추가하지 않는다. VM 안의 상세 로그가 필요하면 **destroy 이전**에 필요한 비밀 제거된 부분을 별도로 수집한다.
@@ -524,6 +635,8 @@ OpenStack 시험 자원 정리에 실패한 채 VMware VM을 삭제하면 해당
 - [이전: OpenTofu 입문 가이드 - 5 — staging 시험 후 release 승격](2026-10-15-opentofu-staging-release.md)
 - [OpenTofu 입문 가이드 - 4 — Runner와 인증·State 경로](2026-10-14-opentofu-gitea-runner.md)
 - [OpenStack Provider 1.53.0 — 환경변수 인증](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/index.md)
+- [Glance 이미지 — local_file_path](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/images_image_v2.md)
+- [Neutron 네트워크 — value_specs](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/networking_network_v2.md)
 - [OpenStack 인스턴스·볼륨 부팅](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/compute_instance_v2.md)
 - [OpenStack 볼륨 연결](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/resources/compute_volume_attach_v2.md)
 - [OpenTofu destroy](https://opentofu.org/docs/v1.10/cli/commands/destroy/) · [State](https://opentofu.org/docs/v1.10/language/state/)
