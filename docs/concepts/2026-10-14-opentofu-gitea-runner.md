@@ -377,6 +377,7 @@ State 파일만 지워 VM을 잊게 만드는 방법은 사용하지 않는다. 
 
 ## 8. 참고 자료
 
+- [다음: OpenTofu 입문 가이드 - 5 — staging 시험 후 release 승격](2026-10-15-opentofu-staging-release.md)
 - [OpenTofu 입문 가이드 - 2: VMware VM과 게스트 초기화](../design/2026-10-08-opentofu-vsphere-rocky.md)
 - [OpenTofu 입문 가이드 - 3: TAR 설치·Ansible 원격 실행](2026-10-12-opentofu-ansible-deploy.md)
 - [Gitea Runner와 실행 방식](https://docs.gitea.com/runner/)
