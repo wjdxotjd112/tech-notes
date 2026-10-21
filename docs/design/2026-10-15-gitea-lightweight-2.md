@@ -24,6 +24,8 @@ tags:
 
 [1편](2026-10-15-gitea-lightweight-1.md)에서는 26GiB clone의 원인과 코드·설치 재료를 분리한 이유를 살펴봤다. 이번에는 그 구조를 실제 서비스로 구성한다.
 
+여기서 구축하는 것은 **사내 자동화 서버**다. 고객사에 이 구성을 그대로 옮기거나 Gitea·Runner를 다시 설치하는 것은 아니다. 고객사의 Private Nexus와 Ansible 준비는 [6편](2026-10-21-gitea-lightweight-6.md)에서 다룬다.
+
 실제 사용 중인 Compose·Runner 설정을 기준으로 정리했다. 예제에서는 주소와 비밀번호 관리를 정리하고, 지원하지 않는 Compose 옵션을 제외했다. 서버에 적용된 값과 다르게 제안하는 부분은 해당 위치에 표시한다.
 
 ## 1. 무엇을 어디에 실행하는가
@@ -693,10 +695,10 @@ Nexus 사용자도 다운로드용과 게시용을 분리한다.
 | CI 게시 | 필요한 Repository의 `browse`·`read`·`add`·`edit` |
 | 오래된 Bundle·후보 정리 | 정리 대상 Repository에만 `delete` 추가 |
 
-실제 패키징에서는 REST API 검색과 삭제도 사용한다. 정확한 Privilege 조합은 공개 스크립트와 함께 후속 편에서 다룬다. 여기서는 관리자 계정을 Workflow에 전달하지 않는 원칙을 정한다.
+실제 패키징에서는 REST API 검색과 삭제도 사용한다. 게시 계정은 담당 Repository의 조회·업로드·채널 갱신·보관 정리에 필요한 권한으로 제한한다. 시험 저장소를 추가할 때의 계정 구분은 [5편](../automation/2026-10-21-gitea-lightweight-5.md)에서 이어간다.
 
 !!! warning "호스트 실행 Runner의 명령은 호스트 권한을 사용한다"
-    실제 구성에서는 일반 Runner 계정이 root 소유 containerd 소켓을 직접 쓰지 않고, 필요한 빌드 작업을 root 소유 전용 래퍼로 호출한다. 소켓을 777로 바꾸거나 Runner에 무제한 sudo를 주지 않는다. 래퍼와 제한된 sudo 구성은 패키징 편에서 다룬다.
+    실제 구성에서는 일반 Runner 계정이 root 소유 containerd 소켓을 직접 쓰지 않고, 필요한 빌드 작업을 root 소유 전용 래퍼로 호출한다. 소켓을 777로 바꾸거나 Runner에 무제한 sudo를 주지 않는다. 래퍼의 역할과 호출 관계는 4편에서 설명한다.
 
 ---
 
@@ -756,4 +758,6 @@ Workflow: runs-on: contrabass-engine-release
 
 여기까지 구성하면 코드를 보관하는 Gitea, 설치 재료를 공급하는 Nexus, 명령을 실행하는 Runner의 기반이 갖춰진다.
 
-**다음 3편은 「대용량 파일을 Nexus로 옮기고 Ansible 연결하기」다.** 실제 파일 분류, Docker와 Raw 저장 방식, Ansible의 `copy`에서 `get_url`로 변경하는 부분을 이어간다.
+다음 [3편 — 대용량 파일을 Nexus로 옮기고 Ansible 연결하기](2026-10-15-gitea-lightweight-3.md)에서는 설치 재료를 이관하고 Ansible을 연결한다.
+
+[← 1편: 문제와 개선 방향](2026-10-15-gitea-lightweight-1.md) · [3편: Nexus 이관과 Ansible 연결 →](2026-10-15-gitea-lightweight-3.md)

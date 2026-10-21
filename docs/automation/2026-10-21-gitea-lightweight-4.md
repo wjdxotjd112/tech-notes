@@ -1,6 +1,6 @@
 ---
 title: "사내 Gitea 경량화 (4) — 릴리스 태그로 고객사 반입 패키지 자동 만들기"
-summary: "Gitea Actions와 호스트 Runner로 코드·Raw 파일·컨테이너 이미지를 하나의 TAR로 묶는다. Workflow와 스크립트의 역할, 캐시 재사용, Nexus 게시와 current 채널, 사업수행팀의 다운로드 흐름을 정리했다."
+summary: "Gitea Actions와 호스트 Runner로 코드·Raw 파일·컨테이너 이미지를 하나의 TAR로 묶는다. 태그 실행 조건, 스크립트의 역할과 캐시 재사용, Nexus의 버전별 게시와 current 채널을 정리했다."
 summary_style: editorial
 date: 2026-10-21
 category: 자동화 CI/CD
@@ -24,13 +24,13 @@ tags:
 
 [3편](../design/2026-10-15-gitea-lightweight-3.md)에서는 Git의 대용량 파일을 Nexus로 옮기고 Ansible의 다운로드 경로를 바꿨다. 이제 코드만 clone할 수 있지만, 폐쇄망에 가져갈 때는 코드와 설치 재료를 다시 한곳에 모아야 한다.
 
-이 수집 작업을 Gitea Actions와 Runner에 맡겼다. 이번 편은 **자동 패키징 구조 → Workflow 흐름 → 팀의 릴리스 작업 → 사업수행팀 다운로드** 순서로 설명한다. VM을 만들어 배포 시험하는 OpenTofu 연계는 마지막에 별도 가이드로 연결한다.
+이 수집 작업을 Gitea Actions와 Runner에 맡겼다. 이번 편은 **자동 패키징 구조 → Workflow 흐름 → 팀의 릴리스 작업 → 게시 결과와 채널** 순서로 설명한다. [5편](2026-10-21-gitea-lightweight-5.md)에서는 최종 게시 앞에 배포 시험을 연결하고, [6편](../design/2026-10-21-gitea-lightweight-6.md)에서는 사업수행팀이 결과물을 사용하는 과정을 다룬다.
 
 ## 1. 자동 패키징 구조
 
 **Workflow**는 언제 어떤 명령을 실행할지 적은 작업 정의이고, **Runner**는 그 명령을 실제로 실행하는 프로그램이다. Gitea가 작업을 관리하고 Runner가 실행 로그와 결과를 돌려준다. [Gitea Actions](https://docs.gitea.com/1.25/usage/actions/overview/), [Runner 실행 구조](https://docs.gitea.com/runner/)
 
-<figure class="flow" aria-label="릴리스 패키징 전체 흐름">
+<figure class="flow" aria-label="배포 시험을 붙이기 전의 패키징 기본 흐름">
   <ol>
     <li>릴리스 태그 push</li>
     <li>Runner에서 재료 수집·TAR 생성</li>
@@ -52,27 +52,7 @@ Nexus의 역할도 재료와 결과물로 구분된다.
 
 `manifest.yaml`은 **이번 릴리스에 넣을 재료 목록**이다. 경로·이미지 태그뿐 아니라 파일 SHA256과 이미지 digest도 기록한다. Nexus에 마지막으로 업로드된 파일을 임의로 고르는 방식이 아니다.
 
-패키지는 다음처럼 구성된다. 컨테이너 이미지 묶음뿐 아니라, 고객사에서 Nexus를 처음 띄우는 데 필요한 재료도 포함한다.
-
-```text title="최종 TAR 안의 주요 파일"
-contrabass-engine-deploy/
-├── deploy.sh                          # 고객사 실행 진입점
-├── setup-private-environment.sh       # 런타임·Private Nexus 준비와 재료 반입
-├── manifest.yaml                      # 설치 재료 목록
-├── release-info.yaml                  # 릴리스·Git·manifest 식별 정보
-├── SHA256SUMS                         # 내부 파일의 체크섬 목록
-├── git/init-container/                # 해당 태그의 코드
-├── raw/                               # manifest에 명시한 일반 파일
-├── images/
-│   ├── release-images.tar             # 여러 컨테이너 이미지를 함께 저장
-│   └── image-map.txt                  # 이미지 이름·태그·digest 대응표
-└── nexus/
-    ├── nexus-image.tar                # Nexus 자체의 컨테이너 이미지
-    ├── compose.yaml
-    └── nexus.properties
-```
-
-사내 Nexus의 DB나 Blob Store 전체를 복제하는 패키지는 아니다. 고객사에서는 빈 Nexus를 띄운 뒤 **이번 manifest에 지정한 파일과 이미지**를 반입한다.
+패키지에는 코드·일반 파일·컨테이너 이미지뿐 아니라 고객사에서 Nexus를 처음 띄울 재료와 실행 스크립트도 넣는다. 사내 Nexus의 DB나 Blob Store 전체를 복제하는 방식은 아니다. 내부 디렉터리와 현장 사용 순서는 6편에서 살펴본다.
 
 ---
 
@@ -101,10 +81,10 @@ name: Publish private cloud release
 
 jobs:
   release:
-    runs-on: linux_amd64
+    runs-on: contrabass-engine-release
 ```
 
-`runs-on`은 등록한 Runner의 라벨과 맞춘다. 여기서는 2편의 `linux_amd64:host` 라벨을 기준으로 했다.
+`runs-on`은 등록한 Runner의 라벨과 맞춘다. 여기서는 2편의 `contrabass-engine-release:host` 라벨을 기준으로 했다.
 
 | 작업 | 최종 패키징 |
 | --- | --- |
@@ -236,11 +216,11 @@ git push origin v4.1.2
 이후 Gitea의 **저장소 → Actions → 해당 실행**에서 clone·manifest·빌드·게시 로그를 확인한다. 태그 이름, manifest 버전, 수집한 재료, 게시 경로가 맞는지 확인하고 사업수행팀에 릴리스를 안내한다.
 
 !!! note "배포 시험을 붙인 경우의 게시 시점"
-    패키징과 배포 검증은 다른 단계다. OpenTofu 검증을 연계한 Workflow는 **TAR 생성 → staging 게시 → VM 설치·기능 시험 → 통과한 동일 TAR 최종 게시** 순서로 실행한다. 이때 `publish-bundle.sh`와 채널 갱신은 시험 뒤에 둔다. 상세 구성은 [OpenTofu 입문가이드 5](../concepts/2026-10-15-opentofu-staging-release.md), [6](../concepts/2026-10-15-opentofu-functional-test-cleanup.md)에서 이어진다.
+    패키징과 배포 검증은 다른 단계다. 검증을 연계한 최종 흐름은 **TAR 생성 → staging 게시 → VM 설치·기능 시험 → 통과한 동일 TAR 최종 게시**다. 이때 `publish-bundle.sh`와 채널 갱신은 시험 뒤에 둔다. [다음 5편](2026-10-21-gitea-lightweight-5.md)에서 이 발행 조건을 연결한다.
 
 ---
 
-## 4. 사업수행팀 다운로드
+## 4. 게시 결과와 다운로드 채널
 
 사업수행팀은 Git과 Nexus의 재료를 각각 수집하지 않는다. **원하는 채널에서 TAR 하나를 받는다.** 채널은 배포 대상으로 안내할 버전을 가리키는 고정 주소다.
 
@@ -264,42 +244,10 @@ git push origin v4.1.2
 
 `update-release-alias`가 map 파일과 HAProxy의 실행 중 map을 갱신한다. 새 릴리스마다 HAProxy 설정 본문을 사람이 수정하는 구조는 아니다. 채널 메타데이터는 Nexus에 실제 파일로 저장하지만, 채널의 TAR 주소는 이 리다이렉트로 제공한다. [HAProxy map 갱신](https://www.haproxy.com/documentation/haproxy-runtime-api/reference/set-map/)
 
-<p class="subsection-title"><strong>4-1. 원하는 계열을 선택해 다운로드</strong></p>
-
-<div class="section-body" markdown="1">
-
-인터넷·사내망에 접근 가능한 작업 서버의 다운로드 디렉터리에서 실행한다. `download-user`는 읽기 계정의 예시이며 비밀번호는 프롬프트에 입력한다. 전체 최신은 `current`, 특정 계열은 `4.1`처럼 지정한다.
-
-```bash title="전체 최신 패키지 받기"
-CHANNEL=current
-
-curl -kfL --user download-user \
-  "https://192.0.2.10:8443/repository/raw-manifest/channels/${CHANNEL}/contrabass-engine-deploy.tar" \
-  -o contrabass-engine-deploy.tar
-```
-
-`-L`이 있어야 302가 안내하는 실제 TAR까지 받는다. 별도의 manifest를 먼저 내려받아 경로를 계산하지 않아도 된다. **HTTP 요청은 리다이렉트를 따라가지만, 대용량 TAR 본문을 두 번 다운로드하는 것은 아니다.**
-
-</div>
-
-<p class="subsection-title"><strong>4-2. 고객사에 반입한 뒤 실행</strong></p>
-
-<div class="section-body" markdown="1">
-
-다운로드한 TAR를 고객사의 전용 배포 노드로 옮긴 뒤 압축을 푼다. 기존 실행 환경에 덮어쓰지 않도록 별도의 작업 디렉터리에서 진행한다.
-
-```bash title="고객사 배포 노드에서 실행"
-tar -xf contrabass-engine-deploy.tar
-cd contrabass-engine-deploy
-sudo ./deploy.sh 192.0.2.101 --accept-eula
-```
-
-`192.0.2.101`은 고객사에서 Private Nexus를 띄울 배포 노드 주소로 바꾼다. `--accept-eula`는 Nexus 사용약관을 확인한 뒤 동의를 표시하는 인자다.
-
-스크립트는 런타임과 Private Nexus를 준비하고, 가져온 파일·이미지를 넣은 뒤 Ansible 컨테이너를 실행한다. **이 단계와 OpenStack 전체 배포 완료는 구분**한다. 이후 inventory·배포 변수를 맞추고 Ansible을 수행하는 과정은 [3편](../design/2026-10-15-gitea-lightweight-3.md)의 흐름으로 이어진다.
-
-</div>
-
 완성된 Bundle은 **계열별 최신 두 버전**을 보관한다. 예를 들어 4.1.1·4.1.2가 있는 상태에서 4.1.3을 게시하면 4.1.2·4.1.3을 남긴다. 이는 Bundle 보관 정책이지 Git 태그나 원본 Raw·이미지를 함께 삭제하는 정책은 아니다.
 
 Git이 설치 재료 전체를 보관하던 역할은 끝나고, **릴리스할 코드와 재료 목록을 확정하는 역할**이 남는다. Runner는 그 기준으로 반입 파일을 만들고, 사업수행팀은 고정된 다운로드 방식으로 같은 결과물을 가져간다.
+
+다음 [5편](2026-10-21-gitea-lightweight-5.md)에서는 이 결과물을 곧바로 공개하지 않고 배포 시험을 거쳐 발행하도록 바꾼다. 다운로드·압축 해제·고객사 실행 명령은 [6편](../design/2026-10-21-gitea-lightweight-6.md)에 모았다.
+
+[← 3편: Nexus 이관과 Ansible 연결](../design/2026-10-15-gitea-lightweight-3.md) · [5편: 배포 시험 후 릴리스 →](2026-10-21-gitea-lightweight-5.md)

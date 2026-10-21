@@ -149,9 +149,11 @@ inventory/
 
 ```yaml title="inventory/group_vars/all/main.yml — 일부"
 # Controller01 API Network
-nexus_url: 192.0.2.101:55555
+nexus_url: 192.0.2.101:8443
 package_ip: 198.51.100.10/rocky-9.6
 ```
+
+여기서는 고객사 Private Nexus의 HTTPS 호스트 포트를 `8443`으로 예시했다. 사내 Nexus 직접 접속 포트 `55555`와는 별개이며, 실제 접속할 Nexus의 포트로 맞춘다.
 
 `nexus.yml`이 이 주소에 Repository와 파일 경로를 붙인다. 아래는 대표 항목만 추린 것이다.
 
@@ -227,7 +229,7 @@ SHA256은 파일 내용이 같은지 비교하는 해시이고, digest는 이미
 
 ## 3. Ansible 받는 방법
 
-이 절은 **사내에서 릴리스 코드를 받아 확인하는 흐름**이다. 고객사 반입용 TAR를 만드는 자동 패키징은 다음 편에서 다룬다.
+이 절은 **개발자가 사내에서 릴리스 코드를 직접 받아 확인하는 흐름**이다. 사업수행팀이 고객사에 반입할 때는 Git을 별도로 clone하지 않고 [6편의 TAR](2026-10-21-gitea-lightweight-6.md)를 사용한다.
 
 <p class="subsection-title"><strong>3-1. 릴리스 태그 기준으로 코드 받기</strong></p>
 
@@ -290,4 +292,6 @@ Ansible은 Git의 task·설정으로 배포를 진행하고, 역할마다 필요
 
 </div>
 
-다음 편에서는 이 코드와 설치 재료를 Runner가 모아 **고객사 반입용 TAR 하나로 패키징하는 흐름**을 정리한다.
+다음 [4편](../automation/2026-10-21-gitea-lightweight-4.md)에서는 이 코드와 설치 재료를 Runner가 모아 **고객사 반입용 TAR 하나로 패키징하는 흐름**을 정리한다.
+
+[← 2편: 사내 서비스 구축](2026-10-15-gitea-lightweight-2.md) · [4편: 태그 기준 자동 패키징 →](../automation/2026-10-21-gitea-lightweight-4.md)

@@ -38,6 +38,20 @@ tags:
 | 사업수행팀이 버전 브랜치를 전체 clone | 필요한 릴리스의 TAR 하나 다운로드 |
 | 받은 Git의 파일로 설치 시작 | TAR에서 Private Nexus와 배포 컨테이너 기동 |
 
+<details class="analysis-toggle" markdown="1">
+<summary>시리즈 읽는 순서 — 문제 확인부터 고객사 반입까지</summary>
+
+| 편 | 핵심 질문 |
+| --- | --- |
+| **1. 코드만 받으려는데 저장소가 26GiB였다** | 왜 코드·설치 재료·반입 파일을 분리했나? |
+| [2. Gitea·Nexus·Runner 구축하기](2026-10-15-gitea-lightweight-2.md) | 사내 자동화 기반을 어떻게 구성하나? |
+| [3. 대용량 파일을 Nexus로 옮기고 Ansible 연결하기](2026-10-15-gitea-lightweight-3.md) | 설치 재료의 위치와 Ansible은 어떻게 바뀌나? |
+| [4. 릴리스 태그로 고객사 반입 패키지 자동 만들기](../automation/2026-10-21-gitea-lightweight-4.md) | Runner가 어떤 기준으로 TAR를 만드나? |
+| [5. 배포 시험을 통과한 패키지만 릴리스하기](../automation/2026-10-21-gitea-lightweight-5.md) | 만든 TAR를 언제 정식으로 발행하나? |
+| [6. TAR 하나로 폐쇄망 배포 환경 준비하기](2026-10-21-gitea-lightweight-6.md) | 사업수행팀은 무엇을 받고 어떻게 사용하나? |
+
+</details>
+
 ## 1. Git만 받으면 됐던 시절
 
 우리 팀은 OpenStack 기반 프라이빗 클라우드를 Ansible로 구축한다. Ansible은 여러 서버에 설치와 설정 명령을 순서대로 수행하는 자동화 도구다. 여기에는 코드뿐 아니라 실제 설치에 사용할 재료도 필요했다.
@@ -230,6 +244,7 @@ Nexus 내부도 파일 형식과 역할에 맞게 나눴다.
 | `docker-hosted` | Ansible 실행 이미지, Ceph 등 컨테이너 이미지 |
 | `raw-hosted` | 프로그램 압축 파일, 런타임 바이너리, wheel, QCOW2 |
 | `raw-manifest` | 릴리스별 파일 목록과 코드 식별 정보 |
+| `raw-release-staging` | 배포 시험 전의 후보 TAR와 체크섬 |
 | `raw-release-bundle` | 고객사 반입용 최종 TAR와 체크섬 |
 
 **Ansible도 파일을 찾는 위치를 바꿨다.** Git의 `files/`에서 복사하던 파일은 Nexus URL에서 다운로드하고, 컨테이너 TAR를 불러오던 부분은 Registry의 이미지를 사용하도록 바꿨다. `get_url`은 Ansible 대상 서버가 URL에서 파일을 받는 모듈이다. [Ansible get_url](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/get_url_module.html)
@@ -260,8 +275,10 @@ Nexus 내부도 파일 형식과 역할에 맞게 나눴다.
 패키징에는 `manifest.yaml`이라는 파일 목록을 사용한다. 해당 릴리스에 필요한 Raw 파일의 경로·SHA256과 컨테이너 이미지의 버전·digest를 기록한다. SHA256과 digest는 이름이 같은 재료라도 내용이 맞는지 식별하는 값이다.
 
 <figure class="flow" aria-label="릴리스 태그에서 고객사 반입 파일 생성까지">
-  <ol><li>릴리스 태그 push</li><li>코드·manifest 확보</li><li>Nexus 재료 수집·패키징</li><li>최종 TAR 게시</li></ol>
+  <ol><li>릴리스 태그 push</li><li>재료 수집·TAR 생성</li><li>staging 배포 시험</li><li>통과한 동일 TAR 게시</li></ol>
 </figure>
+
+만든 TAR를 곧바로 사업수행팀에 공개하지 않고, 시험 VM에서 설치와 기본 기능을 확인하는 단계를 둔다. 실패하면 기존 다운로드 채널을 유지하고, 통과한 것과 같은 파일만 최종 게시한다. 이 발행 조건은 5편에서 다룬다.
 
 Runner는 호스트에서 작업을 실행하고, 동시 작업 수는 1개로 구성했다. Raw 파일은 SHA256 캐시가 일치하면 재사용하고, 컨테이너 이미지도 containerd의 로컬 콘텐츠를 재사용한다. 코드만 바뀌었는데 같은 설치 재료를 매번 전부 다시 받지 않도록 한 것이다.
 
@@ -269,7 +286,7 @@ Runner는 호스트에서 작업을 실행하고, 동시 작업 수는 1개로 �
 
 사업수행팀이 받는 파일명은 `contrabass-engine-deploy.tar`로 통일했다. 전체 현재 릴리스나 특정 계열의 현재 릴리스를 선택할 수 있게 고정 다운로드 주소를 제공한다.
 
-실제 TAR는 버전별로 한 번만 저장한다. 앞단의 HAProxy가 고정 주소를 실제 파일 주소로 연결하므로, 전체 현재 버전과 4.1 계열 현재 버전이 같아도 같은 TAR를 중복 게시할 필요가 없다. 이 연결 방식은 패키징 편에서 다룬다.
+실제 TAR는 버전별로 한 번만 저장한다. 앞단의 HAProxy가 고정 주소를 실제 파일 주소로 연결하므로, 전체 현재 버전과 4.1 계열 현재 버전이 같아도 같은 TAR를 중복 게시할 필요가 없다. 이 연결 방식은 [4편](../automation/2026-10-21-gitea-lightweight-4.md)에서 다룬다.
 
 TAR에는 설치 대상 이미지뿐 아니라 **Nexus 자체 이미지와 containerd·nerdctl 등 처음 기동하는 데 필요한 재료**도 넣었다. 고객사에 Nexus가 아직 없는데 Nexus에서 런타임을 다운로드해야 하는 순환을 피하기 위해서다.
 
@@ -297,4 +314,4 @@ TAR에는 설치 대상 이미지뿐 아니라 **Nexus 자체 이미지와 conta
 
 처음에는 `.git`이 왜 이렇게 큰지 확인하려고 시작했다. 분석해 보니 설치 파일을 Git 이력으로 관리하는 문제였고, 이를 풀다 보니 릴리스와 고객사 전달 방식까지 함께 정리하게 됐다.
 
-**다음 편은 「사내 Gitea 경량화 (2) — Gitea·Nexus·Runner 구축하기」다.** 이번에 나눈 역할을 실제 서비스로 구성하는 방법부터 이어간다.
+다음 [2편 — Gitea·Nexus·Runner 구축하기](2026-10-15-gitea-lightweight-2.md)에서는 사내 자동화 서버를 준비한다. 파일 이관은 3편, 패키징과 발행 조건은 4·5편, 고객사 반입은 6편으로 이어진다.

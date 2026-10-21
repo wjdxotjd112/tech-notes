@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 420" role="img" aria-labelledby="title desc">
+  <title id="title">배포 시험 통과 후 동일 TAR 승격</title>
+  <desc id="desc">한 번 빌드한 TAR를 staging에 두고 VM에서 설치와 기능을 시험한다. 통과하면 같은 TAR를 승격하고 실패하면 기존 릴리스를 유지한다.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#2563eb"/></marker></defs>
+  <rect width="360" height="420" rx="12" fill="#f8fafc"/>
+  <g font-family="Pretendard, Noto Sans KR, sans-serif" text-anchor="middle" fill="#1e293b">
+    <g fill="#fff" stroke="#0b1f3a" stroke-width="1.5"><rect x="22" y="18" width="316" height="68" rx="8"/><rect x="22" y="118" width="316" height="68" rx="8"/><rect x="22" y="218" width="316" height="68" rx="8"/><rect x="16" y="336" width="156" height="66" rx="8"/><rect x="188" y="336" width="156" height="66" rx="8"/></g>
+    <text x="180" y="47" font-size="22" font-weight="700">태그 기준 TAR 생성</text><text x="180" y="72" font-size="18" fill="#3d4d63">빌드는 한 번만</text>
+    <text x="180" y="147" font-size="22" font-weight="700">staging 후보 게시</text><text x="180" y="172" font-size="18" fill="#3d4d63">경로와 SHA256 기록</text>
+    <text x="180" y="247" font-size="22" font-weight="700">VM 설치·기능 시험</text><text x="180" y="272" font-size="18" fill="#3d4d63">실제로 받은 TAR 확인</text>
+    <text x="94" y="362" font-size="20" font-weight="700">통과 → 승격</text><text x="94" y="387" font-size="17" fill="#3d4d63">같은 TAR 발행</text>
+    <text x="266" y="362" font-size="20" font-weight="700" fill="#9a3412">실패 → 중단</text><text x="266" y="387" font-size="17" fill="#3d4d63">기존 채널 유지</text>
+    <g stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#arrow)"><path d="M180 88V110"/><path d="M180 188V210"/><path d="M180 288V310H94V328"/><path d="M180 310H266V328"/></g>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 350" role="img" aria-labelledby="title desc">
+  <title id="title">폐쇄망에서 로컬 재료로 배포 환경 준비</title>
+  <desc id="desc">반입한 TAR의 로컬 런타임과 Nexus 이미지로 먼저 Private Nexus를 기동한다. 재료를 반입한 Nexus에서 Ansible과 각 배포 노드에 파일과 이미지를 공급한다.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#2563eb"/></marker></defs>
+  <rect width="360" height="350" rx="12" fill="#f8fafc"/>
+  <g font-family="Pretendard, Noto Sans KR, sans-serif" text-anchor="middle" fill="#1e293b">
+    <g fill="#fff" stroke="#0b1f3a" stroke-width="1.5"><rect x="22" y="20" width="316" height="76" rx="8"/><rect x="22" y="137" width="316" height="76" rx="8"/><rect x="22" y="254" width="316" height="76" rx="8"/></g>
+    <text x="180" y="50" font-size="22" font-weight="700">반입 TAR · 로컬 파일</text><text x="180" y="77" font-size="18" fill="#3d4d63">런타임·Nexus 이미지 준비</text>
+    <text x="180" y="167" font-size="22" font-weight="700">고객사 Private Nexus</text><text x="180" y="194" font-size="18" fill="#3d4d63">파일·컨테이너 이미지 반입</text>
+    <text x="180" y="284" font-size="22" font-weight="700">Ansible · 배포 대상 노드</text><text x="180" y="311" font-size="18" fill="#3d4d63">고객사 내부 주소로 공급</text>
+    <g stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)"><path d="M180 98V129"/><path d="M180 215V246"/></g>
+    <text x="264" y="121" font-size="17" fill="#2563eb">먼저 기동</text><text x="264" y="238" font-size="17" fill="#2563eb">그다음 배포</text>
+  </g>
+</svg>
