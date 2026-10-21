@@ -629,6 +629,7 @@ OpenStack 시험 자원 정리에 실패한 채 VMware VM을 삭제하면 해당
 
 ## 9. 참고 자료
 
+- [다음: OpenTofu 입문 가이드 - 7 — PR 승인·시험 생략·릴리스 운영](2026-10-21-opentofu-release-operation.md)
 - [이전: OpenTofu 입문 가이드 - 5 — staging 시험 후 release 승격](2026-10-15-opentofu-staging-release.md)
 - [OpenTofu 입문 가이드 - 4 — Runner와 인증·State 경로](2026-10-14-opentofu-gitea-runner.md)
 - [OpenStack Provider 1.53.0 — 환경변수 인증](https://github.com/terraform-provider-openstack/terraform-provider-openstack/blob/v1.53.0/docs/index.md)
