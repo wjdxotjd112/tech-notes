@@ -1,0 +1,153 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+# root 전용 설정. 이 스크립트는 CI job에서 호출하지 않는다.
+source /etc/gitea-runner-env/backup.env
+
+exec 9>/run/lock/release-services-backup.lock
+flock -n 9 || { echo 'Another backup or repository maintenance is running.' >&2; exit 1; }
+
+for command in nerdctl rsync restic tar systemctl curl flock realpath install getent; do
+  command -v "${command}" >/dev/null
+done
+
+: "${BACKUP_HOST:?}" "${STAGING_DIR:?}" "${RESTIC_REPOSITORY:?}" "${RESTIC_PASSWORD_FILE:?}"
+: "${GITEA_DATA_DIR:?}" "${NEXUS_DATA_DIR:?}" "${BUNDLE_BUILDER_DIR:?}"
+: "${RUNNER_HOME:?}" "${TOFU_ROOT:?}" "${SERVICE_IMAGES_DIR:?}"
+: "${GITEA_HEALTH_URL:?}" "${NEXUS_HEALTH_URL:?}"
+: "${GITEA_DB_USER:?}" "${GITEA_DB_NAME:?}"
+
+# --delete는 운영 데이터가 아니라 준비한 staging 하위 복사본에만 적용한다.
+[[ "${STAGING_DIR}" == /* && "${STAGING_DIR}" != / ]]
+[[ -d "${STAGING_DIR}" && ! -L "${STAGING_DIR}" ]]
+[[ "$(realpath -e "${STAGING_DIR}")" == "${STAGING_DIR}" ]]
+[[ -f "${STAGING_DIR}/.release-backup-staging" ]]
+for source_dir in "${GITEA_DATA_DIR}" "${NEXUS_DATA_DIR}" "${BUNDLE_BUILDER_DIR}" \
+                  "${RUNNER_HOME}" "${TOFU_ROOT}" "${SERVICE_IMAGES_DIR}"; do
+  [[ -d "${source_dir}" ]]
+  source_dir="$(realpath -e "${source_dir}")"
+  [[ "${source_dir}" != / && "${source_dir}" != "${STAGING_DIR}" ]]
+  [[ "${STAGING_DIR}" != "${source_dir}/"* && "${source_dir}" != "${STAGING_DIR}/"* ]]
+done
+test -r "${RESTIC_PASSWORD_FILE}"
+test -r "${RUNNER_HOME}/.runner"
+test -d "${RUNNER_HOME}/.ssh"
+(( ${#CONFIG_PATHS[@]} > 0 ))
+for config_path in "${CONFIG_PATHS[@]}"; do
+  [[ "${config_path}" != /* && "${config_path}" != *..* ]]
+  [[ -e "/${config_path}" || -L "/${config_path}" ]]
+done
+systemctl is-active --quiet gitea-runner
+for container in gitea gitea-db nexus; do
+  [[ "$(nerdctl inspect -f '{{.State.Running}}' "${container}")" == true ]]
+done
+
+copy_tree() {
+  local source_dir="$1" destination="$2"
+  shift 2
+  [[ ! -L "${STAGING_DIR}/${destination}" ]] || return 1
+  install -d -m 0700 "${STAGING_DIR}/${destination}" || return 1
+  rsync -aHAX --numeric-ids --delete "$@" "${source_dir}/" "${STAGING_DIR}/${destination}/"
+}
+
+precopy() {
+  local rc=0
+  copy_tree "$@" || rc=$?
+  # 가동 중 임시 파일이 사라진 경우의 24만 허용한다. 최종 동기화에서는 허용하지 않는다.
+  [[ "${rc}" == 0 || "${rc}" == 24 ]]
+}
+
+wait_http() {
+  local url="$1"
+  for ((attempt=0; attempt<120; attempt++)); do
+    # 자체 서명 인증서를 쓰는 내부 healthcheck다. 외부 통신에는 검증 생략을 적용하지 않는다.
+    if curl -kfsS --connect-timeout 5 --max-time 10 "${url}" >/dev/null; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+runner_stopped=0
+gitea_stopped=0
+nexus_stopped=0
+resume_services() {
+  if ((nexus_stopped)); then
+    nerdctl start nexus >/dev/null || return 1
+    nexus_stopped=0
+  fi
+  if ((gitea_stopped)); then
+    nerdctl start gitea >/dev/null || return 1
+    gitea_stopped=0
+  fi
+  if ((runner_stopped)); then
+    wait_http "${NEXUS_HEALTH_URL}" || return 1
+    wait_http "${GITEA_HEALTH_URL}" || return 1
+    systemctl start gitea-runner || return 1
+    runner_stopped=0
+  fi
+}
+on_exit() {
+  local rc=$?
+  trap - EXIT
+  if ! resume_services; then
+    echo 'Service restart/readiness failed. Keep Runner stopped and inspect the services.' >&2
+    rc=1
+  fi
+  exit "${rc}"
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+echo '[1/5] Pre-copy live data; this copy is not yet a valid backup.'
+precopy "${GITEA_DATA_DIR}" gitea-data
+precopy "${NEXUS_DATA_DIR}" nexus-data --exclude=/db/
+precopy "${BUNDLE_BUILDER_DIR}" bundle-builder
+precopy "${SERVICE_IMAGES_DIR}" service-images
+precopy "${TOFU_ROOT}" opentofu --exclude=.terraform/ --exclude='*.tfplan' --exclude='*.plan' --exclude='.ci.lock'
+
+echo '[2/5] Stop Runner gracefully, then quiesce Gitea and Nexus.'
+# Runner의 shutdown_timeout보다 systemd TimeoutStopSec를 길게 설정한다.
+runner_stopped=1
+systemctl stop gitea-runner
+gitea_stopped=1
+nerdctl stop --time 120 gitea >/dev/null
+nexus_stopped=1
+nerdctl stop --time 120 nexus >/dev/null
+# SIGKILL 종료를 정상 정지로 간주하지 않는다. 143은 SIGTERM 종료 코드다.
+for container in gitea nexus; do
+  case "$(nerdctl inspect -f '{{.State.ExitCode}}' "${container}")" in
+    0|143) ;;
+    *) echo "Unexpected shutdown result: ${container}" >&2; exit 1 ;;
+  esac
+done
+
+echo '[3/5] Final sync, PostgreSQL dump, and configuration snapshot.'
+copy_tree "${GITEA_DATA_DIR}" gitea-data
+copy_tree "${NEXUS_DATA_DIR}" nexus-data
+nerdctl exec gitea-db pg_dump -U "${GITEA_DB_USER}" -d "${GITEA_DB_NAME}" -Fc \
+  > "${STAGING_DIR}/gitea.dump"
+nerdctl exec -i gitea-db pg_restore --list < "${STAGING_DIR}/gitea.dump" >/dev/null
+copy_tree "${BUNDLE_BUILDER_DIR}" bundle-builder
+copy_tree "${SERVICE_IMAGES_DIR}" service-images
+copy_tree "${TOFU_ROOT}" opentofu --exclude=.terraform/ --exclude='*.tfplan' --exclude='*.plan' --exclude='.ci.lock'
+copy_tree "${RUNNER_HOME}/.ssh" runner-ssh
+install -m 0600 "${RUNNER_HOME}/.runner" "${STAGING_DIR}/runner-registration"
+getent passwd gitea-runner > "${STAGING_DIR}/runner-user.txt"
+getent group gitea-runner > "${STAGING_DIR}/runner-group.txt"
+tar --acls --xattrs --numeric-owner -cpf "${STAGING_DIR}/configuration.tar" \
+  -C / "${CONFIG_PATHS[@]}"
+nerdctl images --digests > "${STAGING_DIR}/container-images.txt"
+date --iso-8601=seconds > "${STAGING_DIR}/captured-at.txt"
+
+echo '[4/5] Resume services before the remote transfer.'
+resume_services
+trap - EXIT
+
+echo '[5/5] Create an encrypted remote backup snapshot.'
+restic backup --host "${BACKUP_HOST}" --tag release-services "${STAGING_DIR}"
+restic snapshots --host "${BACKUP_HOST}" --tag release-services
+echo 'Remote backup completed. Retention/prune are separate operations.'

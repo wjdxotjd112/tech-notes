@@ -159,7 +159,7 @@ BUNDLE_BUILDER_DIR=/opt/gitea/bundle-builder
 BUNDLE_WORK_DIR=/data/private-release
 RAW_CACHE_DIR=/data/private-release-cache/raw/sha256
 RUNNER_WORKSPACE=/var/lib/gitea-runner/workspace
-RELEASE_KEEP_COUNT=2
+RELEASE_KEEP_COUNT=3
 ```
 
 `RUNNER_WORKSPACE`는 Workflow의 clone·작업 경로다. `BUNDLE_WORK_DIR`는 TAR를 만들고 게시하기 전까지 두는 공간이며 장기 보관소가 아니다. 게시 검증 후 로컬 TAR와 체크섬은 지우고, Raw 캐시와 containerd 이미지 콘텐츠는 다음 작업을 위해 남긴다.
@@ -244,7 +244,7 @@ git push origin v4.1.2
 
 `update-release-alias`가 map 파일과 HAProxy의 실행 중 map을 갱신한다. 새 릴리스마다 HAProxy 설정 본문을 사람이 수정하는 구조는 아니다. 채널 메타데이터는 Nexus에 실제 파일로 저장하지만, 채널의 TAR 주소는 이 리다이렉트로 제공한다. [HAProxy map 갱신](https://www.haproxy.com/documentation/haproxy-runtime-api/reference/set-map/)
 
-완성된 Bundle은 **계열별 최신 두 버전**을 보관한다. 예를 들어 4.1.1·4.1.2가 있는 상태에서 4.1.3을 게시하면 4.1.2·4.1.3을 남긴다. 이는 Bundle 보관 정책이지 Git 태그나 원본 Raw·이미지를 함께 삭제하는 정책은 아니다.
+완성된 Bundle은 **계열별 최신 세 버전**을 보관한다. 예를 들어 4.1.1·4.1.2·4.1.3이 있는 상태에서 4.1.4를 게시하면 4.1.2·4.1.3·4.1.4를 남긴다. 이는 Bundle 보관 정책이지 Git 태그나 원본 Raw·이미지를 함께 삭제하는 정책은 아니다. 운영 기준은 [8편](../design/2026-10-22-gitea-lightweight-8.md)에서 다룬다.
 
 Git이 설치 재료 전체를 보관하던 역할은 끝나고, **릴리스할 코드와 재료 목록을 확정하는 역할**이 남는다. Runner는 그 기준으로 반입 파일을 만들고, 사업수행팀은 고정된 다운로드 방식으로 같은 결과물을 가져간다.
 

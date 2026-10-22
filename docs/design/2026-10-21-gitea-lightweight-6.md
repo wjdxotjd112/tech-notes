@@ -37,11 +37,16 @@ tags:
 다음은 빈 다운로드 디렉터리에서 실행하는 예시다. 주소는 사내 다운로드 서버로, `download-user`는 읽기 계정으로 바꾼다. 비밀번호는 프롬프트에 입력한다.
 
 ```bash title="사내에서 반입 패키지 다운로드"
+set -euo pipefail
 CHANNEL=current
 
-curl -kfL --user download-user \
+tar_url="$(curl -kfL --user download-user \
   "https://192.0.2.10:8443/repository/raw-manifest/channels/${CHANNEL}/contrabass-engine-deploy.tar" \
-  -o contrabass-engine-deploy.tar
+  -o contrabass-engine-deploy.tar --write-out '%{url_effective}')"
+
+curl -kfL --user download-user "${tar_url}.sha256" \
+  -o contrabass-engine-deploy.tar.sha256
+sha256sum -c contrabass-engine-deploy.tar.sha256
 ```
 
 4.1 계열이 필요하면 `CHANNEL=4.1`로 바꾼다. **manifest를 따로 받아 조합할 필요 없이 이 TAR가 반입 파일**이다. HAProxy가 고정 주소를 실제 버전 경로로 안내하므로 `-L`을 사용한다. 리다이렉트 요청과 TAR 본문 다운로드를 두 번 받는 것은 다르다.
@@ -49,6 +54,10 @@ curl -kfL --user download-user \
 `-k`는 자체 서명 인증서를 사용하는 예제의 인증서 검증 생략 옵션이다. 계정 인증을 생략하는 옵션은 아니며, 신뢰할 CA가 준비된 환경에서는 인증서 검증을 유지한다.
 
 받은 TAR는 그 시점의 확정된 파일이다. 다운로드 뒤 `current`가 새 버전으로 바뀌어도 이미 가져온 TAR의 내용이 저절로 바뀌지는 않는다.
+
+**고객사 반입 전에는 같은 버전의 `.tar.sha256`을 함께 받아 TAR 전체를 검증한다.** 위 명령은 `--write-out '%{url_effective}'`로 실제 TAR를 받은 고정 버전 URL을 `tar_url`에 저장한다. 체크섬은 그 URL에 `.sha256`을 붙여 받으므로 도중에 channel이 이동해도 다른 버전의 체크섬을 잘못 받지 않는다.
+
+큰 TAR 본문은 한 번, 작은 체크섬 파일은 한 번 받는다. `curl --user`는 요청마다 비밀번호를 물을 수 있다. 해시가 일치하지 않으면 압축 해제·실행하지 않는다.
 
 ---
 
@@ -60,7 +69,6 @@ contrabass-engine-deploy/
 ├── setup-private-environment.sh       # 런타임·Nexus 준비와 파일·이미지 반입
 ├── manifest.yaml                      # 반입할 재료 목록
 ├── release-info.yaml                  # 릴리스와 Git 형상 정보
-├── SHA256SUMS                         # 내부 파일 체크섬
 ├── git/init-container/                # 해당 릴리스의 Ansible 코드와 설정
 ├── raw/                               # 일반 파일과 런타임 바이너리
 ├── images/
@@ -129,7 +137,7 @@ sudo ./deploy.sh 192.0.2.101 --accept-eula
 
 | 순서 | 스크립트가 하는 일 |
 | --- | --- |
-| ① 검증 | 필수 파일과 `SHA256SUMS` 확인 |
+| ① 준비 확인 | 필수 파일·설치 재료 확인. TAR 전체 해시는 압축 해제 전에 검증 |
 | ② 런타임 준비 | 로컬 반입 바이너리로 컨테이너 런타임 준비·사용 가능 여부 확인 |
 | ③ Nexus 준비 | Nexus 이미지 load, HTTPS 설정, 컨테이너 실행·응답 대기 |
 | ④ 재료 반입 | Repository 생성, `raw/` 업로드, 이미지 load·고객사 주소로 tag·push |
@@ -227,7 +235,7 @@ ansible-playbook -i inventory/inventory.ini main.yml
 
 사내 시험을 통과한 릴리스라도 고객사의 네트워크·디스크·자원 조건은 다를 수 있다. 고객사 환경 설정과 현장 확인을 대신하는 것은 아니다.
 
-## 5. 시리즈를 마치며 — Git 경량화가 바꾼 작업 흐름
+## 5. 배포 흐름 정리 — Git 경량화가 바꾼 작업
 
 1편의 시작은 26GiB 저장소였다. 끝에서 달라진 것은 파일 크기만이 아니다.
 
@@ -235,6 +243,6 @@ ansible-playbook -i inventory/inventory.ini main.yml
 - **Runner:** 필요한 재료를 모아 시험하고, 통과한 동일 TAR를 발행한다.
 - **사업수행팀:** 파일을 다시 조합하지 않고, 받은 TAR로 고객사 배포 환경을 준비한다.
 
-개발자가 과거 이미지 이력까지 받던 작업과, 고객사에 설치 재료를 가져가는 작업을 분리했다. 이것이 이 시리즈에서 Git·Nexus·자동화를 함께 정리한 이유다.
+개발자가 과거 이미지 이력까지 받던 작업과, 고객사에 설치 재료를 가져가는 작업을 분리했다. 이것이 이 시리즈에서 Git·Nexus·자동화를 함께 정리한 이유다. 다음 7편부터는 이 구조를 계속 사용할 때 필요한 승인·발행 규칙, 저장 공간 관리, 백업·복구로 이어진다.
 
-[← 5편: 배포 시험 후 릴리스](../automation/2026-10-21-gitea-lightweight-5.md) · [1편부터 다시 보기](2026-10-15-gitea-lightweight-1.md)
+[← 5편: 배포 시험 후 릴리스](../automation/2026-10-21-gitea-lightweight-5.md) · [7편: 팀의 릴리스 운영 →](../automation/2026-10-22-gitea-lightweight-7.md)
