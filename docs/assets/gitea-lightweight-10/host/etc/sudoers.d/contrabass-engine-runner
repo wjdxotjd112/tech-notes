@@ -1,0 +1,2 @@
+gitea-runner ALL=(root) NOPASSWD: /usr/local/sbin/build-private-release *
+gitea-runner ALL=(root) NOPASSWD: /usr/local/sbin/update-release-alias *

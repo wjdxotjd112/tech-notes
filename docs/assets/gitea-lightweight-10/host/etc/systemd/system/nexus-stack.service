@@ -1,0 +1,17 @@
+[Unit]
+Description=Nexus Compose stack
+Requires=containerd.service
+Wants=network-online.target
+After=containerd.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/root/compose
+ExecStart=/usr/local/bin/nerdctl compose -p nexus -f nexus-compose.yaml up -d
+ExecStop=/usr/local/bin/nerdctl stop -t 180 nexus
+TimeoutStartSec=15min
+TimeoutStopSec=4min
+
+[Install]
+WantedBy=multi-user.target

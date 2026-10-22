@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily release-services backup window
+
+[Timer]
+OnCalendar=*-*-* 01:00:00
+Persistent=false
+Unit=release-services-backup.service
+
+[Install]
+WantedBy=timers.target

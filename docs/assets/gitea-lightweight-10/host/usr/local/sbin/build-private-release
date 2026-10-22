@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ $# -ne 2 || ! "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Usage: build-private-release vMAJOR.MINOR.PATCH SOURCE_DIRECTORY" >&2
+  exit 1
+fi
+
+# Only root-owned installed code runs with elevated privileges.
+source /etc/gitea-runner-env/bundle-pipeline.env
+: "${BUNDLE_BUILDER_DIR:?Set BUNDLE_BUILDER_DIR in bundle-pipeline.env}"
+IFS= read -r NEXUS_PASSWORD || { echo "Nexus password was not provided on stdin." >&2; exit 1; }
+[[ -n "${NEXUS_PASSWORD}" ]] || { echo "Nexus password is empty." >&2; exit 1; }
+exec flock -n /run/lock/private-release-builder.lock \
+  env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+  BUNDLE_BUILDER_DIR="${BUNDLE_BUILDER_DIR}" \
+  NEXUS_PASSWORD="${NEXUS_PASSWORD}" \
+  /bin/bash "${BUNDLE_BUILDER_DIR}/build-bundle.sh" "$1" "$2"

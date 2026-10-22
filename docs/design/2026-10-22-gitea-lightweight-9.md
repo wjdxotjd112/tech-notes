@@ -496,4 +496,4 @@ systemctl status gitea-runner --no-pager
 
 1편의 문제는 코드를 받기 위해 과거 이미지까지 내려받아야 한다는 것이었다. 지금은 Git이 코드와 릴리스 기준을, Nexus가 설치 재료와 배포물을, Runner가 패키징·시험·게시를 맡는다. 여기에 **승인 규칙·보관 정책·복구 절차**가 붙어야 그 구조를 계속 운영할 수 있다.
 
-[← 8편: Nexus와 배포 이미지 관리](2026-10-22-gitea-lightweight-8.md) · [1편: 왜 경량화를 시작했나](2026-10-15-gitea-lightweight-1.md)
+[← 8편: Nexus와 배포 이미지 관리](2026-10-22-gitea-lightweight-8.md) · [10·마무리: 물리서버 통합 구축](2026-10-22-gitea-lightweight-10.md) · [1편: 왜 경량화를 시작했나](2026-10-15-gitea-lightweight-1.md)

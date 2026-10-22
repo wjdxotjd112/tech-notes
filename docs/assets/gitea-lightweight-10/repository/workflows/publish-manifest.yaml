@@ -1,0 +1,341 @@
+name: Publish Contrabass Engine Release
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag (for example, v4.2.5)
+        required: true
+
+jobs:
+  release:
+    runs-on: contrabass-engine-release
+    env:
+      EVENT_REF_NAME: ${{ gitea.ref_name }}
+      EVENT_COMMIT: ${{ gitea.sha }}
+      MANUAL_RELEASE_TAG: ${{ inputs.release_tag }}
+      REPO_READ_TOKEN: ${{ secrets.REPO_READ_TOKEN }}
+      NEXUS_PASSWORD: ${{ secrets.NEXUS_RUNNER_PASSWORD }}
+      VSPHERE_USER: ${{ secrets.VSPHERE_USER }}
+      VSPHERE_PASSWORD: ${{ secrets.VSPHERE_PASSWORD }}
+
+    steps:
+      - name: Shallow clone release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          rm -f -- vm-cleanup.enabled test-passed.sha256 staging-upload.enabled release-policy.yaml staging-info.yaml bundle-published.enabled
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          release_tag="${MANUAL_RELEASE_TAG:-${EVENT_REF_NAME}}"
+          [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ -n "${REPO_READ_TOKEN}" ]]
+          GIT_CONFIG_COUNT=2 \
+          GIT_CONFIG_KEY_0=http.sslVerify GIT_CONFIG_VALUE_0="$([[ "${TLS_SKIP_VERIFY}" == true ]] && echo false || echo true)" \
+          GIT_CONFIG_KEY_1=http.extraHeader \
+          GIT_CONFIG_VALUE_1="Authorization: token ${REPO_READ_TOKEN}" \
+          git clone \
+            --depth=1 --single-branch --branch "${release_tag}" \
+            "${GITEA_REPO_URL}" \
+            source
+          if [[ -z "${MANUAL_RELEASE_TAG}" ]]; then
+            # Accept annotated tags too, while pinning this push event's commit.
+            test "$(git -C source rev-parse HEAD)" = "$(git -C source rev-parse "${EVENT_COMMIT}^{commit}")"
+          fi
+
+      - name: Select tests from PR label or patch tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          select_test_mode source "${MANUAL_RELEASE_TAG:-${EVENT_REF_NAME}}" release-policy.yaml
+          mode="$(yaml_value release-policy.yaml test_mode)"
+          [[ "${mode}" == full || "${mode}" == skip ]]
+          printf 'TEST_MODE=%s\n' "${mode}" >> "${GITHUB_ENV}"
+
+      - name: Publish manifest, build bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          export GITEA_REF_NAME="${MANUAL_RELEASE_TAG:-${EVENT_REF_NAME}}"
+          export GITEA_COMMIT="$(git -C source rev-parse HEAD)"
+          bash "${BUNDLE_BUILDER_DIR}/publish-manifest.sh" source/release/manifest.yaml release-info.yaml
+          printf '%s\n' "${NEXUS_PASSWORD}" \
+            | sudo -n /usr/local/sbin/build-private-release "${GITEA_REF_NAME}" "$(realpath source)"
+
+      - name: Fingerprint bundle and stage full-test candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          : "${NEXUS_PASSWORD:?Missing CI publishing password}"
+          : "${STAGING_REPOSITORY:?Set STAGING_REPOSITORY}"
+          [[ "${STAGING_REPOSITORY}" != "${BUNDLE_REPOSITORY}" ]]
+
+          manifest_id="$(yaml_value release-info.yaml manifest_id)"
+          [[ "${manifest_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          bundle="${BUNDLE_WORK_DIR}/${manifest_id}.tar"
+          test -s "${bundle}"
+          sha="$(file_sha256 "${bundle}")"
+          [[ "${sha}" == "$(awk '{print $1; exit}' "${bundle}.sha256")" ]]
+
+          path="candidates/${manifest_id}/${sha}/contrabass-engine-deploy.tar"
+          url="${NEXUS_URL%/}/repository/${STAGING_REPOSITORY}/${path}"
+          printf '%s\n' "bundle_path: ${path}" "bundle_sha256: ${sha}" > staging-info.yaml
+          printf '%s  %s\n' "${sha}" contrabass-engine-deploy.tar > staging.sha256
+          if [[ "${TEST_MODE:?Missing release policy}" == skip ]]; then
+            echo 'Deployment tests intentionally skipped; no VM or staging upload.'
+            exit 0
+          fi
+          touch staging-upload.enabled
+
+          if nexus_get_optional "${url}.sha256" staging.remote.sha256; then
+            [[ "$(awk '{print $1; exit}' staging.remote.sha256)" == "${sha}" ]]
+          else
+            nexus_curl -fsS --retry "${HTTP_RETRY_COUNT}" \
+              --upload-file "${bundle}" "${url}"
+            nexus_curl -fsS --retry "${HTTP_RETRY_COUNT}" \
+              --upload-file staging.sha256 "${url}.sha256"
+          fi
+
+      - name: Test release with OpenTofu
+        if: env.TEST_MODE == 'full'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          job_dir="${PWD}"
+          rm -f -- "${job_dir}/vm-cleanup.enabled" "${job_dir}/test-passed.sha256"
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          export_test_inputs staging-info.yaml
+
+          : "${TOFU_PROJECT_DIR:?Set TOFU_PROJECT_DIR}"
+          : "${TOFU_SSH_PRIVATE_KEY:?Set TOFU_SSH_PRIVATE_KEY}"
+          : "${NEXUS_URL:?Set NEXUS_URL}"
+          : "${BUNDLE_REPOSITORY:?Set BUNDLE_REPOSITORY}"
+          : "${VSPHERE_USER:?Set VSPHERE_USER secret}"
+          : "${VSPHERE_PASSWORD:?Set VSPHERE_PASSWORD secret}"
+          : "${TF_VAR_nexus_user:?Set NEXUS_USER}"
+          : "${TF_VAR_nexus_password:?Set NEXUS_RUNNER_PASSWORD secret}"
+          test -r "${TOFU_SSH_PRIVATE_KEY}"
+          test -s "${TOFU_PROJECT_DIR}/deployment.tf"
+
+          tag="$(yaml_value release-info.yaml release_tag)"
+          [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cd "${TOFU_PROJECT_DIR}"
+          exec 9>.ci.lock
+          flock -n 9 || { echo 'OpenTofu project is already in use.' >&2; exit 1; }
+
+          tofu init -input=false -no-color
+          tofu fmt -check
+          tofu validate -no-color
+
+          if [[ -f terraform.tfstate ]]; then
+            managed="$(tofu state list)"
+            if grep -q '^vsphere_virtual_machine\.vm\[' <<< "${managed}"; then
+              echo 'Previous test VMs remain. Review and clean them manually before the next test.' >&2
+              exit 1
+            fi
+          fi
+
+          echo "Test release: ${tag}"
+          touch "${job_dir}/vm-cleanup.enabled"
+          tofu plan -input=false -no-color -out=deploy.tfplan
+          tofu apply -input=false -no-color deploy.tfplan
+
+      - name: Test OpenStack functions
+        if: env.TEST_MODE == 'full'
+        shell: bash
+        env:
+          OS_PASSWORD: ${{ secrets.OPENSTACK_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          job_dir="${PWD}"
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          : "${OPENSTACK_TEST_DIR:?Set OPENSTACK_TEST_DIR}"
+          : "${OS_PASSWORD:?Set OPENSTACK_PASSWORD secret}"
+          test -f "${job_dir}/vm-cleanup.enabled"
+
+          export OS_AUTH_URL="${OPENSTACK_AUTH_URL:?Set OPENSTACK_AUTH_URL}"
+          export OS_USERNAME="${OPENSTACK_USERNAME:?Set OPENSTACK_USERNAME}"
+          export OS_PROJECT_NAME="${OPENSTACK_PROJECT_NAME:?Set OPENSTACK_PROJECT_NAME}"
+          export OS_USER_DOMAIN_NAME="${OPENSTACK_USER_DOMAIN_NAME}"
+          export OS_PROJECT_DOMAIN_NAME="${OPENSTACK_PROJECT_DOMAIN_NAME}"
+          export TF_VAR_image_file="${OPENSTACK_IMAGE_FILE}"
+          unset OS_CLOUD OS_TOKEN OS_AUTH_TOKEN
+          export TF_IN_AUTOMATION=1 TF_INPUT=0
+
+          cd "${OPENSTACK_TEST_DIR}"
+          exec 8>.ci.lock
+          flock -n 8
+          [[ -r "${OPENSTACK_IMAGE_FILE}" && -s "${OPENSTACK_IMAGE_FILE}" ]] || {
+            echo "Prepare a readable, non-empty ${OPENSTACK_IMAGE_FILE} in OPENSTACK_TEST_DIR." >&2
+            exit 1
+          }
+          tofu init -input=false -no-color
+          tofu fmt -check
+          tofu validate -no-color
+
+          if [[ -f terraform.tfstate ]]; then
+            managed="$(tofu state list)"
+            if grep -qv '^data\.' <<< "${managed}" && [[ -n "${managed}" ]]; then
+              echo 'Previous OpenStack test resources remain; inspect their State first.' >&2
+              exit 1
+            fi
+          fi
+
+          cleanup() {
+            result=$?
+            trap - EXIT
+            set +e
+            echo 'Clean OpenStack test resources'
+            tofu destroy -auto-approve -input=false -no-color
+            cleanup_result=$?
+            rm -f -- smoke.tfplan
+            if (( cleanup_result != 0 )); then
+              echo 'OpenStack cleanup failed; keep State for investigation.' >&2
+              if (( result == 0 )); then result=1; fi
+            fi
+            if (( result != 0 )); then rm -f -- "${job_dir}/test-passed.sha256"; fi
+            exit "${result}"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          tofu plan -input=false -no-color -out=smoke.tfplan
+          tofu apply -input=false -no-color smoke.tfplan
+          tofu output -json smoke_result | jq -e \
+            '.image_status == "active" and .power_state == "active"
+             and (.network_ids | length) == 2
+             and (.volume_id == .attached_volume_id)'
+
+          sha="$(yaml_value "${job_dir}/staging-info.yaml" bundle_sha256)"
+          [[ "${sha}" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s\n' "${sha}" > "${job_dir}/test-passed.sha256"
+
+      - name: Publish tested or explicitly skipped bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          manifest_id="$(yaml_value release-info.yaml manifest_id)"
+          [[ "${manifest_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          expected="$(yaml_value staging-info.yaml bundle_sha256)"
+          [[ "${expected}" =~ ^[0-9a-f]{64}$ ]]
+          case "${TEST_MODE:?Missing release policy}" in
+            full) [[ "$(<test-passed.sha256)" == "${expected}" ]] ;;
+            skip) echo 'Publish without deployment tests, as explicitly selected.' ;;
+            *) exit 1 ;;
+          esac
+          [[ "$(file_sha256 "${BUNDLE_WORK_DIR}/${manifest_id}.tar")" == "${expected}" ]]
+          bash "${BUNDLE_BUILDER_DIR}/publish-bundle.sh" release-info.yaml
+          touch bundle-published.enabled
+
+      - name: Clean test VMs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -f vm-cleanup.enabled ]] || exit 0
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          : "${TOFU_PROJECT_DIR:?Set TOFU_PROJECT_DIR}"
+          : "${TOFU_SSH_PRIVATE_KEY:?Set TOFU_SSH_PRIVATE_KEY}"
+
+          export_test_inputs staging-info.yaml
+
+          cd "${TOFU_PROJECT_DIR}"
+          exec 9>.ci.lock
+          flock -n 9
+          trap 'rm -f -- deploy.tfplan vm-info.json' EXIT
+          tofu destroy -auto-approve -input=false -no-color
+
+      - name: Clean staging candidate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -s staging-info.yaml && -f staging-upload.enabled ]] || exit 0
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          [[ "${STAGING_REPOSITORY}" != "${BUNDLE_REPOSITORY}" ]]
+          path="$(yaml_value staging-info.yaml bundle_path)"
+          sha="$(yaml_value staging-info.yaml bundle_sha256)"
+          manifest_id="$(yaml_value release-info.yaml manifest_id)"
+          [[ "${manifest_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          [[ "${sha}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${path}" == "candidates/${manifest_id}/${sha}/contrabass-engine-deploy.tar" ]]
+
+          ids="$(mktemp)"
+          trap 'rm -f -- "${ids}"' EXIT
+          next_page=""
+          while true; do
+            request=(-fsS --get \
+              --data-urlencode "repository=${STAGING_REPOSITORY}")
+            if [[ -n "${next_page}" ]]; then
+              request+=(--data-urlencode "continuationToken=${next_page}")
+            fi
+            page="$(nexus_curl "${request[@]}" "${NEXUS_URL%/}/service/rest/v1/assets")"
+            jq -r --arg path "${path}" \
+              '.items[] | (.path | ltrimstr("/")) as $p | select($p == $path or $p == ($path + ".sha256")) | .id' \
+              <<< "${page}" >> "${ids}"
+            next_page="$(jq -r '.continuationToken // empty' <<< "${page}")"
+            [[ -n "${next_page}" ]] || break
+          done
+
+          while IFS= read -r id; do
+            encoded="$(jq -rn --arg id "${id}" '$id | @uri')"
+            nexus_curl -fsS -X DELETE \
+              "${NEXUS_URL%/}/service/rest/v1/assets/${encoded}"
+          done < "${ids}"
+
+      - name: Record release execution
+        if: always()
+        shell: bash
+        env:
+          RUN_RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          [[ -s release-policy.yaml ]] || exit 0
+          source /etc/gitea-runner-env/bundle-pipeline.env
+          source "${BUNDLE_BUILDER_DIR}/common.sh"
+          tag="$(yaml_value release-policy.yaml release_tag)"
+          [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          record="$(mktemp)"
+          trap 'rm -f -- "${record}"' EXIT
+          cp release-policy.yaml "${record}"
+          printf '%s\n' "job_status: ${RUN_RESULT}" \
+            "run_id: ${GITHUB_RUN_ID:-unknown}" \
+            "run_attempt: ${GITHUB_RUN_ATTEMPT:-0}" >> "${record}"
+          if [[ -s staging-info.yaml ]]; then
+            printf 'bundle_sha256: %s\n' "$(yaml_value staging-info.yaml bundle_sha256)" >> "${record}"
+          fi
+          if [[ -f bundle-published.enabled ]]; then
+            echo 'published: true' >> "${record}"
+          else
+            echo 'published: false' >> "${record}"
+          fi
+          if [[ -f test-passed.sha256 ]]; then
+            echo 'verification: passed' >> "${record}"
+          elif [[ "$(yaml_value release-policy.yaml test_mode)" == skip ]]; then
+            echo 'verification: skipped' >> "${record}"
+          else
+            echo 'verification: not-passed' >> "${record}"
+          fi
+          path="executions/${tag}/${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-0}-$(date -u +%Y%m%dT%H%M%S).yaml"
+          nexus_curl -fsS --retry "${HTTP_RETRY_COUNT}" \
+            --upload-file "${record}" "${NEXUS_URL%/}/repository/${MANIFEST_REPOSITORY}/${path}"
+          echo "Release execution recorded: ${path}"

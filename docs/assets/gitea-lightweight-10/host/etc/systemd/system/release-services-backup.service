@@ -1,0 +1,15 @@
+[Unit]
+Description=Consistent backup of release services
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/local/sbin/backup-release-services
+ExecStartPost=/bin/bash -c 'set -euo pipefail; source /etc/gitea-runner-env/backup.env; exec /usr/bin/flock -n /run/lock/release-services-backup.lock /usr/bin/restic forget --host "$${BACKUP_HOST}" --tag release-services --keep-daily 7 --keep-weekly 4 --keep-monthly 3'
+TimeoutStartSec=12h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

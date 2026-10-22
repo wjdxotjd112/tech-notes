@@ -1,0 +1,38 @@
+log:
+  level: info
+  job:
+    dir: /var/lib/gitea-runner/logs
+    retention: 168h
+    max_size: 20MB
+
+runner:
+  file: /var/lib/gitea-runner/.runner
+  capacity: 1
+  timeout: 3h
+  shutdown_timeout: 3h
+  insecure: true
+
+  labels:
+    - "contrabass-engine-release:host"
+
+  action_shallow_clone: true
+
+  workdir_cleanup_age: 24h
+  idle_cleanup_interval: 10m
+
+cache:
+  enabled: false
+
+host:
+  workdir_parent: /var/lib/gitea-runner/workspace
+
+health_check:
+  enabled: true
+  min_free_disk_space_mb: 20480
+  interval: 30s
+  timeout: 10s
+
+metrics:
+  enabled: true
+  addr: 127.0.0.1:9101
+  readiness_grace: 30s

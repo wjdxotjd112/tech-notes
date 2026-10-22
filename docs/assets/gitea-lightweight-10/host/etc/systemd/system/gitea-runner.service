@@ -1,0 +1,39 @@
+[Unit]
+Description=Gitea Actions Runner 4.0.0
+Documentation=https://docs.gitea.com/runner/
+Wants=network-online.target containerd.service gitea-stack.service nexus-stack.service haproxy.service
+After=network-online.target containerd.service gitea-stack.service nexus-stack.service haproxy.service
+
+[Service]
+Type=simple
+
+User=gitea-runner
+Group=gitea-runner
+
+WorkingDirectory=/var/lib/gitea-runner
+
+Environment="HOME=/var/lib/gitea-runner"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+ExecStart=/usr/local/bin/gitea-runner daemon --config /etc/gitea-runner/config.yaml
+
+Restart=on-failure
+RestartSec=5s
+
+TimeoutStopSec=185min
+KillSignal=SIGTERM
+
+LimitNOFILE=65536
+UMask=0077
+# sudo is required by the two root-owned release wrappers.
+# NoNewPrivileges would break those wrappers.
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

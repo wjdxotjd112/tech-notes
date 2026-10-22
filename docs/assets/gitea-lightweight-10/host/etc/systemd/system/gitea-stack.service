@@ -1,0 +1,18 @@
+[Unit]
+Description=Gitea and PostgreSQL Compose stack
+Requires=containerd.service
+Wants=network-online.target
+After=containerd.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/root/compose
+ExecStart=/usr/local/bin/nerdctl compose -p gitea -f gitea-compose.yaml up -d
+ExecStop=/usr/local/bin/nerdctl stop -t 120 gitea
+ExecStop=/usr/local/bin/nerdctl stop -t 120 gitea-db
+TimeoutStartSec=15min
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+#!/bin/bash
+set -eu
+[ "$1" = "postcustomization" ] || exit 0
+exec >> /var/log/opentofu-guest-init.log 2>&1
+
+key="$(printf '%s' '${base64encode(ssh_public_key)}' | base64 -d)"
+uplink='${provider_uplink_interface}'
+
+if [ -n "$key" ]; then
+  install -d -m 700 /root/.ssh
+  touch /root/.ssh/authorized_keys
+  grep -qxF -- "$key" /root/.ssh/authorized_keys ||
+    printf '%s\n' "$key" >> /root/.ssh/authorized_keys
+  chmod 600 /root/.ssh/authorized_keys
+  restorecon -R /root/.ssh
+fi
+
+for profile in $(nmcli -g UUID connection show); do
+  device="$(nmcli -g connection.interface-name connection show uuid "$profile")"
+  if [ "$device" = "$uplink" ]; then
+    nmcli connection modify uuid "$profile" \
+      ipv4.method disabled ipv6.method disabled connection.autoconnect yes
+    nmcli connection up uuid "$profile" ifname "$uplink"
+    echo 'guest-init complete'
+    exit 0
+  fi
+done
+
+echo "No connection profile bound to $uplink" >&2
+exit 1

@@ -1,0 +1,60 @@
+#!/bin/bash
+set -euo pipefail
+
+[[ "$(id -u)" -eq 0 && $# -eq 2 ]] || {
+  echo "Usage: update-release-alias <current|MAJOR.MINOR> <vMAJOR.MINOR.PATCH>" >&2
+  exit 1
+}
+source /etc/gitea-runner-env/bundle-pipeline.env
+source "${BUNDLE_BUILDER_DIR}/common.sh"
+IFS= read -r NEXUS_PASSWORD
+
+channel="$1"
+release_tag="$2"
+[[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+release_line="${release_tag#v}"
+release_line="${release_line%.*}"
+[[ "${channel}" == current || "${channel}" == "${release_line}" ]] || {
+  echo "Channel does not match release: ${channel}, ${release_tag}" >&2
+  exit 1
+}
+
+: "${PUBLIC_RELEASE_URL:?}"
+: "${NEXUS_URL:?}"
+: "${MANIFEST_REPOSITORY:?}"
+: "${BUNDLE_REPOSITORY:?}"
+: "${HAPROXY_MAP_FILE:?}"
+: "${HAPROXY_SOCKET:?}"
+[[ "${PUBLIC_RELEASE_URL}" == https://* ]]
+[[ -S "${HAPROXY_SOCKET}" && -f "${HAPROXY_MAP_FILE}" ]]
+
+alias_path="/repository/${MANIFEST_REPOSITORY}/channels/${channel}/contrabass-engine-deploy.tar"
+release_path="/repository/${BUNDLE_REPOSITORY}/releases/${release_line}/${release_tag}/contrabass-engine-deploy.tar"
+target_url="${PUBLIC_RELEASE_URL%/}${release_path}"
+nexus_curl -fsSI "${NEXUS_URL%/}${release_path}" >/dev/null
+
+exec 9>/run/lock/release-alias.lock
+flock 9
+
+map_temp="$(mktemp "${HAPROXY_MAP_FILE}.XXXXXX")"
+trap 'rm -f -- "${map_temp}"' EXIT
+map_action=add
+if awk -v alias_path="${alias_path}" '$1 == alias_path {found=1} END {exit !found}' "${HAPROXY_MAP_FILE}"; then
+  map_action=set
+fi
+awk -v alias_path="${alias_path}" '$1 != alias_path' "${HAPROXY_MAP_FILE}" > "${map_temp}"
+printf '%s %s\n' "${alias_path}" "${target_url}" >> "${map_temp}"
+chmod 0644 "${map_temp}"
+mv -f -- "${map_temp}" "${HAPROXY_MAP_FILE}"
+
+# Runtime update avoids interrupting an in-progress multi-GiB download.
+response="$(printf '%s map %s %s %s\n' "${map_action}" "${HAPROXY_MAP_FILE}" "${alias_path}" "${target_url}" \
+  | socat -t 5 - "UNIX-CONNECT:${HAPROXY_SOCKET}")"
+[[ -z "${response}" || "${response}" == *"New entry added"* ]] || {
+  echo "HAProxy map update failed: ${response}" >&2
+  exit 1
+}
+
+nexus_curl -fsSIL \
+  "${PUBLIC_RELEASE_URL%/}${alias_path}" -o /dev/null
+echo "${alias_path} -> ${target_url}"
