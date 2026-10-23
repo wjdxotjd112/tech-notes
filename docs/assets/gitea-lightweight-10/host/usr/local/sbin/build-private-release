@@ -6,13 +6,15 @@ if [[ $# -ne 2 || ! "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-# Only root-owned installed code runs with elevated privileges.
+# Clear inherited variables before reading the password. Never place it in argv.
 source /etc/gitea-runner-env/bundle-pipeline.env
 : "${BUNDLE_BUILDER_DIR:?Set BUNDLE_BUILDER_DIR in bundle-pipeline.env}"
-IFS= read -r NEXUS_PASSWORD || { echo "Nexus password was not provided on stdin." >&2; exit 1; }
-[[ -n "${NEXUS_PASSWORD}" ]] || { echo "Nexus password is empty." >&2; exit 1; }
-exec flock -n /run/lock/private-release-builder.lock \
-  env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
   BUNDLE_BUILDER_DIR="${BUNDLE_BUILDER_DIR}" \
-  NEXUS_PASSWORD="${NEXUS_PASSWORD}" \
-  /bin/bash "${BUNDLE_BUILDER_DIR}/build-bundle.sh" "$1" "$2"
+  flock -n /run/lock/private-release-builder.lock /bin/bash -c '
+    set -euo pipefail
+    IFS= read -r NEXUS_PASSWORD || { echo "Nexus password was not provided on stdin." >&2; exit 1; }
+    [[ -n "${NEXUS_PASSWORD}" ]] || { echo "Nexus password is empty." >&2; exit 1; }
+    export NEXUS_PASSWORD
+    exec /bin/bash "${BUNDLE_BUILDER_DIR}/build-bundle.sh" "$@"
+  ' build-private-release "$1" "$2"

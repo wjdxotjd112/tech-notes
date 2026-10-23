@@ -1879,16 +1879,18 @@ cmp<span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><s
 <span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="k">fi</span>
 
-<span class="c1"># Only root-owned installed code runs with elevated privileges.</span>
+<span class="c1"># Clear inherited variables before reading the password. Never place it in argv.</span>
 <span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/bundle-pipeline.env
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="p">:?Set BUNDLE_BUILDER_DIR in bundle-pipeline.env</span><span class="si">}</span><span class="s2">"</span>
-<span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>NEXUS_PASSWORD<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"Nexus password was not provided on stdin."</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
-<span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_PASSWORD</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"Nexus password is empty."</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
-<span class="nb">exec</span><span class="w"> </span>flock<span class="w"> </span>-n<span class="w"> </span>/run/lock/private-release-builder.lock<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>env<span class="w"> </span>-i<span class="w"> </span><span class="nv">PATH</span><span class="o">=</span>/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin<span class="w"> </span><span class="nv">HOME</span><span class="o">=</span>/root<span class="w"> </span><span class="se">\</span>
+<span class="nb">exec</span><span class="w"> </span>env<span class="w"> </span>-i<span class="w"> </span><span class="nv">PATH</span><span class="o">=</span>/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin<span class="w"> </span><span class="nv">HOME</span><span class="o">=</span>/root<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="nv">NEXUS_PASSWORD</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_PASSWORD</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>/bin/bash<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">/build-bundle.sh"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span>
+<span class="w">  </span>flock<span class="w"> </span>-n<span class="w"> </span>/run/lock/private-release-builder.lock<span class="w"> </span>/bin/bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">'</span>
+<span class="s1">    set -euo pipefail</span>
+<span class="s1">    IFS= read -r NEXUS_PASSWORD || { echo "Nexus password was not provided on stdin." &gt;&amp;2; exit 1; }</span>
+<span class="s1">    [[ -n "${NEXUS_PASSWORD}" ]] || { echo "Nexus password is empty." &gt;&amp;2; exit 1; }</span>
+<span class="s1">    export NEXUS_PASSWORD</span>
+<span class="s1">    exec /bin/bash "${BUNDLE_BUILDER_DIR}/build-bundle.sh" "$@"</span>
+<span class="s1">  '</span><span class="w"> </span>build-private-release<span class="w"> </span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span>
 </code></pre></div>
 
 </details>
@@ -2500,6 +2502,8 @@ curl<span class="w"> </span>-kfsSI<span class="w"> </span><span class="s2">"</sp
 | templates/setup-private-environment.sh | deploy.sh → 런타임·Private Nexus·재료 반입 |
 
 모두 root 소유로 둔다. Runner가 빌더를 직접 수정할 수 있다면 sudo wrapper의 제한이 의미가 없어진다.
+
+Nexus 비밀번호는 Workflow에서 표준입력으로 전달한다. 표준입력은 명령줄 인자가 아니라 파이프로 데이터를 보내는 통로다. `build-private-release`는 `env -i`로 상속 환경을 비운 뒤, `flock` 안의 셸에서 비밀번호를 읽고 환경변수로 설정해 `build-bundle.sh`에 넘긴다. `env NEXUS_PASSWORD="..."`처럼 비밀번호를 명령줄에 넣지 않아 실행 중인 프로세스의 명령줄 조회에 값이 나타나지 않게 한다. Actions Secret과 기존 빌드 호출 방식은 그대로 유지한다.
 
 ```bash title="빌더와 wrapper 설치"
 source /etc/gitea-runner-env/bundle-pipeline.env
