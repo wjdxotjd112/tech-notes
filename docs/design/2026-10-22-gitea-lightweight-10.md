@@ -658,9 +658,25 @@ unset NEXUS_PASSWORD
 
 <div class="section-body" markdown="1">
 
-**관리자 로그인 → 팀원 계정 생성 → 빈 저장소 생성 → 권한 연결 → 초기 코드 push** 순서로 진행한다. 예전 사용자·PR·이력을 복제하는 것이 아니라 새 운영 저장소의 초기 코드를 준비하는 절차다. 이 가이드는 회원가입을 차단했으므로 사이트 관리자가 팀원 계정을 만든다.
+**관리자 로그인 → 사용자 생성 → 조직 생성 → 조직 소유 저장소 준비 → Team 생성 → 사용자·저장소 연결 → 초기 코드 push** 순서로 진행한다. 이 절은 개인별 공동작업자 등록 대신 **조직의 Team으로 권한을 관리하는 방식**을 사용한다. 예전 사용자·PR·이력을 복제하는 것이 아니라 새 운영 저장소의 초기 코드를 준비하는 절차다.
 
-**팀원 계정 생성**
+사용자는 로그인하는 계정이고, 조직은 저장소와 Team을 담는 공간이다. Team은 그 조직 안에서 사용자에게 저장소 권한을 묶어 주는 그룹이다. **Team에 사용자를 넣는 것과 대상 저장소를 연결하는 것을 둘 다 해야 한다.**
+
+```text title="이 절에서 만들 구조"
+Gitea
+├── 사용자: 관리자 / developer / reviewer / ci-reader
+└── 조직: platform
+    ├── 저장소: private-cloud-v4
+    └── Teams
+        ├── Owners       → 조직을 관리할 담당자
+        ├── developers   → 개발자 계정
+        ├── reviewers    → 검토·릴리스 담당자 계정
+        └── ci-readers   → CI 읽기 계정
+```
+
+**① 관리자 계정으로 사용자 생성**
+
+회원가입을 차단했으므로 사이트 관리자가 먼저 각 사용자의 로그인 계정을 만든다. 조직이나 Team을 생성한다고 사용자 계정이 자동으로 만들어지지는 않는다.
 
 1. 최초 설치 때 만든 관리자 계정으로 로그인한다.
 2. 오른쪽 위 프로필 메뉴 → **Site Administration(사이트 관리) → Identity & Access → User Accounts(사용자 계정) → Create User Account(사용자 계정 생성)**으로 이동한다. Gitea 1.25.4의 사용자 생성 주소는 `/-/admin/users/new`다.
@@ -668,40 +684,99 @@ unset NEXUS_PASSWORD
 4. 사람이 쓰는 계정은 최초 로그인 시 비밀번호 변경을 요구하고, 각 사용자가 자기 계정으로 로그인해 변경을 마친다. CI 계정도 비밀번호 변경 요구가 남아 있지 않은 상태에서 7-2절의 토큰을 만든다.
 5. 일반 팀원·검토자·CI 계정에는 **사이트 관리자 권한을 부여하지 않는다.** 사용자 생성과 저장소 권한 부여는 별개다.
 
-| 계정 예시 | 사용할 사람·용도 | 해당 Repository에 부여할 권한 |
+| 계정 예시 | 사용할 사람·용도 | 뒤에서 연결할 Team |
 | --- | --- | --- |
-| developer | 코드 수정 담당자. 실제 운영에서는 사람별 계정 사용 | Write(쓰기) |
-| reviewer | PR 작성자와 다른 검토자 | Write(쓰기) |
-| ci-reader | Runner의 Git clone·PR 정책 조회 | Read(읽기) |
+| developer | 코드 수정 담당자. 실제 운영에서는 사람별 계정 사용 | developers |
+| reviewer | PR 작성자와 다른 검토자·릴리스 담당자 | reviewers |
+| ci-reader | Runner의 Git clone·PR 정책 조회 | ci-readers |
 
 개발자·검토자가 관리자 계정을 공유하지 않도록 한다. 사이트 관리자는 사용자와 서버를 관리하고, 팀원은 저장소에 필요한 권한으로 작업한다. [Gitea 1.25.4 사용자 생성 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/admin/user/new.tmpl)
 
-**빈 Repository와 접근 권한 설정**
+**② 조직 생성과 조직 페이지 열기**
 
-1. 관리자 또는 저장소를 소유할 계정으로 **상단 + → New Repository(새 저장소)**를 연다.
-2. 소유자와 저장소 이름을 선택하고 **Private**으로 만든다. 예시는 `platform/private-cloud-v4`다. README·gitignore·License 자동 생성은 선택하지 않는다. 최초 브랜치는 아래 명령에서 master로 만든다.
-3. `services.env`의 `GITEA_REPOSITORY`를 실제 `소유자/저장소`와 맞춘다. 개인 소유 저장소라면 소유자 계정 이름이 들어간다.
-4. 해당 저장소 → **Settings(설정) → Collaborators(공동작업자)**에서 팀원의 사용자 이름을 검색해 **Add Collaborator(새 공동작업자 추가)**로 추가한다.
-5. 추가된 사용자 옆의 권한을 위 표대로 **Write 또는 Read**로 지정한다. 다른 사용자로 로그인해 해당 private 저장소가 열리는지 확인한다. 저장소 생성에 사용한 소유자는 별도로 공동작업자에 추가하지 않는다.
+1. 최초 관리자 계정으로 로그인한 상태에서 **오른쪽 위 + → New Organization(새 조직)**을 누른다. 직접 접속할 경로는 `/org/create`다. 메뉴가 없으면 현재 로그인한 계정이 사이트 관리자인지 확인한다.
+2. **Organization Name**에 `platform`을 입력한다. 관리자 사용자 이름과 조직 이름을 같은 것으로 생각하지 않는다. 이미 사용 중인 사용자·조직 이름과 겹치지 않는 이름을 정한다.
+3. **Visibility**는 사내 구성원만 사용할 조직이면 **Private**으로 선택한다. 이 설정과 개별 저장소의 Private 설정은 별개다. Repository 관리자가 Team 접근을 바꾸도록 허용하는 항목은 필요할 때만 켠다.
+4. **Create Organization**을 누른다. 조직을 만든 계정은 자동 생성되는 **Owners** 팀에 속한다. Owners에는 조직 관리 담당자만 남기고 일반 개발자·CI 계정을 넣지 않는다.
+5. 생성된 조직 화면에서 **Teams**를 누른다. 예시 조직의 팀 목록 주소는 `https://192.0.2.10:30000/org/platform/teams`다. `192.0.2.10:30000`은 실제 Gitea 주소로 바꾼다.
 
-쓰기 권한이 있어도 master 직접 push를 막는 규칙은 따로 설정해야 한다. **지금은 초기 master·develop을 push하고, 브랜치·Tag 보호 규칙은 7절에서 적용한다.** [Gitea 1.25.4 공동작업자 설정](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/collaboration.tmpl)
+개인 사용자 프로필에 들어가서는 이 조직의 Team을 만들 수 없다. **`platform` 조직 이름이 표시되는 화면이나 위 팀 목록 주소**로 들어간다. 조직을 나중에 다시 찾을 때도 이 주소를 사용할 수 있다. [Gitea 1.25.4 조직 생성 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/org/create.tmpl)
+
+**③ 조직 소유 저장소 준비**
+
+새 저장소를 만드는 경우에는 다음 순서로 진행한다. 이미 개인 계정 아래 저장소를 만들었다면 바로 아래의 이전 절차를 사용한다. 두 방법을 모두 수행하지 않는다.
+
+1. **오른쪽 위 + → New Repository(새 저장소)**를 누른다.
+2. **Owner(소유자)**에서 로그인 사용자 이름이 아니라 **조직 `platform`을 선택**한다. 조직이 목록에 없다면 조직 Owners 계정으로 로그인했는지 확인한다.
+3. 저장소 이름은 `private-cloud-v4`, 공개 범위는 **Private**으로 만든다. README·gitignore·License 자동 생성은 선택하지 않는다. 최초 브랜치는 아래 명령에서 master로 만든다.
+4. 생성 후 저장소 경로가 **`platform/private-cloud-v4`**인지 확인한다. 이것이 `GITEA_REPOSITORY`에 들어갈 값이다.
+
+저장소가 준비되면 **Settings → Repository → Advanced Settings**에서 Actions 사용을 켠다. 서버의 Actions 활성화와 저장소의 실행 허용은 별개다. 저장소 기능을 활성화한 뒤 Team의 기능별 접근 권한을 지정한다.
 
 <details class="analysis-toggle" markdown="1">
-<summary>조직 소유 저장소에서 Team으로 묶어 관리한다면</summary>
+<summary>이미 개인 계정 아래 저장소를 만들었다면 — 삭제하지 않고 조직으로 이전</summary>
 
-Team은 사용자 계정이 아니라 **여러 사용자의 저장소 권한을 묶는 그룹**이다. 개인 소유 저장소는 위의 공동작업자 방식만 사용해도 된다.
+예를 들어 `site-admin/private-cloud-v4`를 먼저 만들었다면 새 저장소를 또 만들지 않고 소유권을 `platform` 조직으로 이전한다. 먼저 조직을 만들고, 그 조직 안에 같은 이름의 저장소가 없는지 확인한다. 기존 커밋·브랜치를 지우거나 Git 이력을 다시 만들 필요는 없다.
 
-조직 소유자 계정으로 **조직 페이지 → Teams → New Team**에서 일반 팀을 만든다. 팀 페이지의 **Members**에 앞서 생성한 사용자 계정을, **Repositories**에 대상 저장소를 추가한다. 전체 저장소 접근과 새 저장소 생성 권한은 필요한 경우에만 허용한다.
+1. 현재 저장소의 소유자이면서 대상 조직의 Owners인 계정으로 로그인한다.
+2. 기존 저장소 → **Settings → Repository → Danger Zone → Transfer Ownership(소유권 이전)**을 연다.
+3. 확인용 저장소 이름에는 현재 저장소 이름을 입력하고, **New Owner**에는 조직 이름 `platform`을 입력한다. Team 이름을 넣는 칸이 아니다.
+4. **Perform Transfer**를 누른다. 이전 완료 후 조직 이름 아래에 저장소가 표시되는지 확인한다. 이전 대기 상태라면 수신 측 승인 안내를 완료한다.
+5. 아래 Team 연결 단계에서 이 저장소를 선택한다. 기존 공동작업자·다른 Team의 권한도 확인한다. 읽기 전용 CI 사용자가 다른 경로로 Write 권한을 받고 있으면 Team을 Read로 설정해도 읽기 전용이 되지 않는다.
 
-- 개발·검토 팀: Code·Pull Requests·Issues에 Write. Issues 권한은 PR 라벨 관리에도 사용한다.
-- CI 읽기 팀: Code·Pull Requests·Issues에 Read.
-- 개발·검토·CI 팀을 조직의 Owners나 관리자 팀에 넣지 않는다.
+이전하면 저장소의 소유자 부분이 달라지므로 `/etc/gitea-runner-env/services.env`의 `GITEA_REPOSITORY`를 새 `조직/저장소`로 수정한다. 로컬 Git에서도 새 주소를 사용한다.
 
-Team 경로로 권한을 부여했다면 같은 사용자를 공동작업자로 중복 등록할 필요는 없다. 이후 브랜치·Tag 보호 규칙의 허용 사용자·팀도 이 구성에 맞춘다. [Gitea 1.25.4 Team 설정](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/org/team/new.tmpl)
+```bash title="소유권 이전 후 로컬 Git 주소 갱신"
+source /etc/gitea-runner-env/bundle-pipeline.env
+git -C /root/private-cloud-v4 remote set-url origin "${GITEA_REPO_URL}"
+git -C /root/private-cloud-v4 remote -v
+```
+
+이미 코드와 브랜치를 push했다면 아래의 최초 코드 준비 명령을 다시 실행하지 않는다. Team 연결·권한 확인을 마친 뒤 6-3절과 7절로 이어간다. 이미 Runner를 등록해 운영하던 저장소라면 이전 후 Actions 활성화·Secrets·Runner의 저장소 접근도 확인한다. [Gitea 1.25.4 소유권 이전 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/options.tmpl)
 
 </details>
 
-Repository의 **Settings → Repository → Advanced Settings**에서도 Actions 사용이 켜져 있는지 확인한다. 서버의 Actions 활성화와 저장소의 실행 허용을 구분한다. 아래 명령의 Git 작성자 이름·이메일은 commit에 기록할 정보이며, push할 때의 Gitea 로그인과는 별개다. push는 소유자 또는 Write 권한을 받은 계정으로 수행한다.
+**④ Team 생성과 권한 지정**
+
+조직의 **Teams** 화면으로 돌아와 다음을 수행한다. 예시 주소는 `/org/platform/teams`다.
+
+1. **New Team**을 누른다. Team Name에 `developers`를 입력한다.
+2. **Repository Access**는 **Specific repositories**를 선택한다. `All repositories`는 선택하지 않는다. 이 팀에 어느 저장소를 연결할지는 생성 후 지정한다.
+3. **Create repositories**는 끈다. 이 옵션은 팀원에게 조직 안의 새 저장소 생성 권한까지 줄 때만 사용한다.
+4. 권한 유형은 **General Access**를 선택한다. **Admin Access**를 선택하면 해당 저장소의 관리자 권한까지 부여되므로 사용하지 않는다.
+5. 아래 **Allow Access to Repository Sections** 표에서 각 기능의 None·Read·Write를 선택하고 **Create Team**을 누른다. 기본 선택을 그대로 두지 말고 아래 표와 대조한다.
+6. 같은 방식으로 `reviewers`, `ci-readers`도 만든다. Team을 만든 계정과 일상적으로 작업할 계정은 구분한다.
+
+| Repository 기능 | developers | reviewers | ci-readers |
+| --- | --- | --- | --- |
+| Code | Write | Write | Read |
+| Pull Requests | Write | Write | Read |
+| Issues | Write | Write | Read |
+| Actions | Read | Write | None |
+| Releases | Read | Write | None |
+| 나머지 기능 | 필요하지 않으면 None | 필요하지 않으면 None | None |
+
+developers는 코드·PR 작업과 로그 조회, reviewers는 검토·릴리스 노트 작성과 Actions 수동 재실행, ci-readers는 Git·PR·라벨 조회에 사용한다. 기능이 서버나 저장소에서 꺼져 있으면 권한 선택도 비활성화될 수 있다. **Team의 Write는 master 직접 push 허용을 뜻하지 않는다.** master·develop·Tag의 실제 허용 범위는 7절의 보호 규칙에서 제한한다. [Gitea 1.25.4 Team 생성·권한 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/org/team/new.tmpl)
+
+**⑤ Team에 사용자와 저장소 연결**
+
+Team을 생성한 것만으로 작업자는 저장소를 사용할 수 없다. 다음 두 연결을 각 Team에서 수행한다.
+
+1. **조직 → Teams → developers → Members**를 연다. 기존 사용자 이름 `developer`를 검색하고 **Add Team Member**로 추가한다. 새 계정을 만드는 화면이 아니라 ①에서 만든 계정을 팀에 넣는 화면이다.
+2. 같은 Team의 **Repositories** 탭을 연다. 조직에 만든 `private-cloud-v4`를 검색해 **Add**로 추가한다. 목록에 없으면 저장소 소유자가 개인 계정으로 남아 있지 않은지 확인한다.
+3. `reviewers`의 Members에는 `reviewer`, Repositories에는 같은 `private-cloud-v4`를 추가한다.
+4. `ci-readers`의 Members에는 `ci-reader`, Repositories에는 같은 `private-cloud-v4`를 추가한다.
+5. 각 Team에서 **Members에 계정이 있고 Repositories에 대상 저장소가 있는지** 확인한다. CI 사용자를 developers·reviewers·Owners에 함께 넣지 않는다.
+
+같은 저장소를 여러 Team에 연결해도 코드가 복사되거나 저장소가 여러 개 생기지 않는다. **저장소 하나를 팀마다 다른 권한으로 사용**하는 것이다. Team으로 연결한 사용자를 저장소의 Collaborators에 다시 추가할 필요는 없다. [구성원 추가 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/org/team/members.tmpl) · [저장소 연결 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/org/team/repositories.tmpl)
+
+**⑥ 다른 사용자로 접속해 확인한 뒤 초기 코드 push**
+
+관리자는 모든 저장소를 볼 수 있으므로 관리자 화면만으로 팀원 권한이 맞다고 판단하지 않는다. 별도 브라우저 프로필이나 시크릿 창에서 developer·reviewer·ci-reader로 각각 로그인해 `platform/private-cloud-v4`가 열리는지 확인한다. 코드가 올라간 뒤에는 개발자·검토자의 PR 작업과 CI 계정의 읽기 전용 접근도 확인한다.
+
+`/etc/gitea-runner-env/services.env`의 `GITEA_REPOSITORY`는 `platform/private-cloud-v4`처럼 **조직 이름/저장소 이름**으로 맞춘다. Team 이름은 이 주소에 들어가지 않는다. 팀원의 사용자 이름도 저장소 소유자 위치에 넣지 않는다.
+
+아래 명령의 Git 작성자 이름·이메일은 commit에 기록할 정보이며, push할 때의 Gitea 로그인과는 별개다. push는 조직의 Owners 또는 Code에 Write 권한을 받은 계정으로 수행한다. 최초 master·develop push를 마친 뒤 7절의 브랜치·Tag 보호 규칙을 적용한다.
 
 ```bash title="기존 .git을 섞지 않고 새 저장소의 초기 코드 준비"
 install -d -m 0700 /root/private-cloud-v4
@@ -913,7 +988,7 @@ full 시험의 inventory는 `192.0.2.101~104`와 맞춘다. 처음 3대는 Contr
 
 <div class="section-body" markdown="1">
 
-6-2절에서 계정·저장소 권한 연결과 최초 master·develop push를 마친 뒤 아래 규칙을 적용한다. PR은 작성자가 아닌 별도 검토자가 승인한다. 계정과 공동작업자를 다시 만들 필요는 없다.
+6-2절에서 조직·Team의 사용자·저장소 연결과 최초 master·develop push를 마친 뒤 아래 규칙을 적용한다. PR은 작성자가 아닌 별도 검토자가 승인한다. 사용자나 Team을 다시 만들 필요는 없다.
 
 Repository의 **Settings → Branches**에서 설정한다.
 
