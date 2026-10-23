@@ -658,9 +658,50 @@ unset NEXUS_PASSWORD
 
 <div class="section-body" markdown="1">
 
-Gitea에 소유자와 빈 private Repository를 만든다. 예시는 `platform/private-cloud-v4`다. README 자동 생성은 끄고 기본 브랜치는 master로 한다. 예전 사용자·PR·이력을 복제하는 것이 아니라 새 운영 저장소의 초기 코드를 준비하는 절차다.
+**관리자 로그인 → 팀원 계정 생성 → 빈 저장소 생성 → 권한 연결 → 초기 코드 push** 순서로 진행한다. 예전 사용자·PR·이력을 복제하는 것이 아니라 새 운영 저장소의 초기 코드를 준비하는 절차다. 이 가이드는 회원가입을 차단했으므로 사이트 관리자가 팀원 계정을 만든다.
 
-Repository의 **Settings → Repository → Advanced Settings**에서도 Actions 사용이 켜져 있는지 확인한다. 서버의 Actions 활성화와 저장소의 실행 허용을 구분한다. 조직으로 운영한다면 개발팀·검토자 팀에 해당 저장소의 Code·Pull Requests 권한을 명시하고, CI 읽기 계정은 관리자 팀에 넣지 않는다. 최초 commit 전에 Git의 user.name과 user.email을 설정한다.
+**팀원 계정 생성**
+
+1. 최초 설치 때 만든 관리자 계정으로 로그인한다.
+2. 오른쪽 위 프로필 메뉴 → **Site Administration(사이트 관리) → Identity & Access → User Accounts(사용자 계정) → Create User Account(사용자 계정 생성)**으로 이동한다. Gitea 1.25.4의 사용자 생성 주소는 `/-/admin/users/new`다.
+3. 인증 소스는 **Local**, 사용자 이름·이메일·초기 비밀번호를 입력하고 계정을 생성한다.
+4. 사람이 쓰는 계정은 최초 로그인 시 비밀번호 변경을 요구하고, 각 사용자가 자기 계정으로 로그인해 변경을 마친다. CI 계정도 비밀번호 변경 요구가 남아 있지 않은 상태에서 7-2절의 토큰을 만든다.
+5. 일반 팀원·검토자·CI 계정에는 **사이트 관리자 권한을 부여하지 않는다.** 사용자 생성과 저장소 권한 부여는 별개다.
+
+| 계정 예시 | 사용할 사람·용도 | 해당 Repository에 부여할 권한 |
+| --- | --- | --- |
+| developer | 코드 수정 담당자. 실제 운영에서는 사람별 계정 사용 | Write(쓰기) |
+| reviewer | PR 작성자와 다른 검토자 | Write(쓰기) |
+| ci-reader | Runner의 Git clone·PR 정책 조회 | Read(읽기) |
+
+개발자·검토자가 관리자 계정을 공유하지 않도록 한다. 사이트 관리자는 사용자와 서버를 관리하고, 팀원은 저장소에 필요한 권한으로 작업한다. [Gitea 1.25.4 사용자 생성 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/admin/user/new.tmpl)
+
+**빈 Repository와 접근 권한 설정**
+
+1. 관리자 또는 저장소를 소유할 계정으로 **상단 + → New Repository(새 저장소)**를 연다.
+2. 소유자와 저장소 이름을 선택하고 **Private**으로 만든다. 예시는 `platform/private-cloud-v4`다. README·gitignore·License 자동 생성은 선택하지 않는다. 최초 브랜치는 아래 명령에서 master로 만든다.
+3. `services.env`의 `GITEA_REPOSITORY`를 실제 `소유자/저장소`와 맞춘다. 개인 소유 저장소라면 소유자 계정 이름이 들어간다.
+4. 해당 저장소 → **Settings(설정) → Collaborators(공동작업자)**에서 팀원의 사용자 이름을 검색해 **Add Collaborator(새 공동작업자 추가)**로 추가한다.
+5. 추가된 사용자 옆의 권한을 위 표대로 **Write 또는 Read**로 지정한다. 다른 사용자로 로그인해 해당 private 저장소가 열리는지 확인한다. 저장소 생성에 사용한 소유자는 별도로 공동작업자에 추가하지 않는다.
+
+쓰기 권한이 있어도 master 직접 push를 막는 규칙은 따로 설정해야 한다. **지금은 초기 master·develop을 push하고, 브랜치·Tag 보호 규칙은 7절에서 적용한다.** [Gitea 1.25.4 공동작업자 설정](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/collaboration.tmpl)
+
+<details class="analysis-toggle" markdown="1">
+<summary>조직 소유 저장소에서 Team으로 묶어 관리한다면</summary>
+
+Team은 사용자 계정이 아니라 **여러 사용자의 저장소 권한을 묶는 그룹**이다. 개인 소유 저장소는 위의 공동작업자 방식만 사용해도 된다.
+
+조직 소유자 계정으로 **조직 페이지 → Teams → New Team**에서 일반 팀을 만든다. 팀 페이지의 **Members**에 앞서 생성한 사용자 계정을, **Repositories**에 대상 저장소를 추가한다. 전체 저장소 접근과 새 저장소 생성 권한은 필요한 경우에만 허용한다.
+
+- 개발·검토 팀: Code·Pull Requests·Issues에 Write. Issues 권한은 PR 라벨 관리에도 사용한다.
+- CI 읽기 팀: Code·Pull Requests·Issues에 Read.
+- 개발·검토·CI 팀을 조직의 Owners나 관리자 팀에 넣지 않는다.
+
+Team 경로로 권한을 부여했다면 같은 사용자를 공동작업자로 중복 등록할 필요는 없다. 이후 브랜치·Tag 보호 규칙의 허용 사용자·팀도 이 구성에 맞춘다. [Gitea 1.25.4 Team 설정](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/org/team/new.tmpl)
+
+</details>
+
+Repository의 **Settings → Repository → Advanced Settings**에서도 Actions 사용이 켜져 있는지 확인한다. 서버의 Actions 활성화와 저장소의 실행 허용을 구분한다. 아래 명령의 Git 작성자 이름·이메일은 commit에 기록할 정보이며, push할 때의 Gitea 로그인과는 별개다. push는 소유자 또는 Write 권한을 받은 계정으로 수행한다.
 
 ```bash title="기존 .git을 섞지 않고 새 저장소의 초기 코드 준비"
 install -d -m 0700 /root/private-cloud-v4
@@ -671,6 +712,10 @@ install -d .gitea/workflows
 install -m 0644 "${CONFIG_SRC}/repository/workflows/publish-manifest.yaml" .gitea/workflows/publish-manifest.yaml
 install -m 0644 "${CONFIG_SRC}/repository/gitignore" .gitignore
 git init -b master
+read -r -p 'Commit author name: ' author_name
+read -r -p 'Commit author email: ' author_email
+git config user.name "${author_name}"
+git config user.email "${author_email}"
 git add .
 git commit -m 'Initialize release platform source'
 source /etc/gitea-runner-env/bundle-pipeline.env
@@ -864,11 +909,11 @@ full 시험의 inventory는 `192.0.2.101~104`와 맞춘다. 처음 3대는 Contr
 
 ## 7. Gitea 사용자·보호 규칙·Secrets
 
-<p class="subsection-title"><strong>7-1. 사용자와 브랜치</strong></p>
+<p class="subsection-title"><strong>7-1. 브랜치·Tag 보호 규칙</strong></p>
 
 <div class="section-body" markdown="1">
 
-관리 화면에서 개발자·검토자·CI 읽기 사용자를 만들고 Repository 권한을 연결한다. 개발·검토 계정은 Code와 Pull Requests에 Write, CI는 코드·PR 읽기 권한을 준다. 관리자 1명이 자기 PR을 승인하는 구조로 만들지 않는다.
+6-2절에서 계정·저장소 권한 연결과 최초 master·develop push를 마친 뒤 아래 규칙을 적용한다. PR은 작성자가 아닌 별도 검토자가 승인한다. 계정과 공동작업자를 다시 만들 필요는 없다.
 
 Repository의 **Settings → Branches**에서 설정한다.
 
