@@ -6,7 +6,6 @@ services:
     restart: unless-stopped
 
     ports:
-      # Nexus Web UI 및 REST API - HTTPS
       - "${NEXUS_HTTPS_PORT}:55555"
 
     environment:

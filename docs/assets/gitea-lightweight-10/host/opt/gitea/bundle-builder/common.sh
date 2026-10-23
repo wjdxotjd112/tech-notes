@@ -1,8 +1,6 @@
 #!/bin/bash
-# Shared configuration and helpers. No downloads or mutations when sourced.
 source /etc/gitea-runner-env/bundle-pipeline.env
 
-# Keep passwords/tokens out of curl's process arguments. FD contents are temporary.
 http_curl() {
   local tls=()
   [[ "${TLS_SKIP_VERIFY}" == true ]] && tls=(--insecure)
@@ -47,7 +45,6 @@ yaml_value() {
 
 file_sha256() { sha256sum "$1" | awk '{print $1}'; }
 
-# Return 1 only for a missing asset; authentication/server errors stop the job.
 nexus_get_optional() {
   local status
   status="$(nexus_curl -sS -o "$2" -w '%{http_code}' "$1")" || exit 1
@@ -65,8 +62,6 @@ require_commands() {
   done
 }
 
-# One policy for tag pushes and manual retries. Never treat API failure as skip.
-# Read CURRENT PR labels on each run; do not modify an existing Git tag.
 select_test_mode() (
   set -euo pipefail
   local source_dir="$1" tag="$2" output="$3" commit release line api scratch status mode=full reason pr=0
@@ -105,7 +100,6 @@ select_test_mode() (
     }
     pr="$(jq -r '.number' "${scratch}/pr.json")"
     gitea_get "pulls/${pr}" "${scratch}/pr.json" || exit 1
-    # A closed PR's head.sha follows its branch. Use the immutable merge parent.
     gitea_get "git/commits/${commit}" "${scratch}/merge.json" || exit 1
     [[ "$(jq '.parents | length' "${scratch}/merge.json")" == 2 ]] || {
       echo 'Release PRs must use a normal merge commit (not squash/rebase).' >&2; exit 1;
@@ -130,10 +124,8 @@ select_test_mode() (
       'any(.labels[]?; .name == $label)' "${scratch}/pr.json" >/dev/null; then mode=skip; fi
     reason=pr-label
   elif [[ " ${LEGACY_RELEASE_TAGS:-} " == *" ${tag} "* ]]; then
-    # Preserve retries of already-published pre-policy versions, without inventing a PR.
     reason=historical-tag
   else
-    # A missing PR is allowed ONLY for an older release line, not new master releases.
     gitea_get "raw/release/manifest.yaml?ref=${RELEASE_BRANCH}" "${scratch}/master.yaml" || exit 1
     master_release="$(yaml_value "${scratch}/master.yaml" release)"
     [[ "${master_release}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]

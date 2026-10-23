@@ -15,6 +15,10 @@ actual files, especially the Nexus image archive.
 Do not copy host/ over an existing server. Install the files in guide order.
 Do not run any of these scripts just to inspect them.
 
+Edit host/etc/gitea-runner-env/services.env for service and pipeline settings.
+bundle-pipeline.env and backup.env load it; do not edit derived settings there.
+Passwords and tokens belong in Actions Secrets or protected credential files.
+
 The VMware sample uses one ESXi host, five template NICs and four test VMs.
 All example network addresses must be replaced with reserved site networks.
 Backup scheduling is optional and must be enabled only after a manual backup.

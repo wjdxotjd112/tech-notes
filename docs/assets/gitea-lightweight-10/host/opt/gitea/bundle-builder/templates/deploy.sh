@@ -17,8 +17,6 @@ bundle_dir="$(cd "$(dirname "$0")" && pwd)"
   echo "Enter an IP address or DNS name without a scheme or port." >&2
   exit 1
 }
-# Verify the outer TAR with its .sha256 file before extraction.
-# Deployment checks required files, not every file in the extracted Git tree.
 
 echo "[1/3] Prepare private Nexus and import release artifacts"
 bash "${bundle_dir}/setup-private-environment.sh" "${nexus_host}" --accept-eula

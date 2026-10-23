@@ -6,7 +6,6 @@ if [[ $# -ne 2 || ! "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-# Clear inherited variables before reading the password. Never place it in argv.
 source /etc/gitea-runner-env/bundle-pipeline.env
 : "${BUNDLE_BUILDER_DIR:?Set BUNDLE_BUILDER_DIR in bundle-pipeline.env}"
 exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \

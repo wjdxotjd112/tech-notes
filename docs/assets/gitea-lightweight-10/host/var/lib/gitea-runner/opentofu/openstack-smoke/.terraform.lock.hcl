@@ -1,6 +1,3 @@
-# This file is maintained automatically by "tofu init".
-# Manual edits may be lost in future updates.
-
 provider "registry.opentofu.org/terraform-provider-openstack/openstack" {
   version     = "1.53.0"
   constraints = "1.53.0"

@@ -42,7 +42,6 @@ jobs:
             "${GITEA_REPO_URL}" \
             source
           if [[ -z "${MANUAL_RELEASE_TAG}" ]]; then
-            # Accept annotated tags too, while pinning this push event's commit.
             test "$(git -C source rev-parse HEAD)" = "$(git -C source rev-parse "${EVENT_COMMIT}^{commit}")"
           fi
 

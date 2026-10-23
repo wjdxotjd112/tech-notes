@@ -129,7 +129,6 @@ install -d -m 0755 -o 200 -g 200 "${NEXUS_DATA}" "${NEXUS_DATA}/etc" "${NEXUS_DA
 install -m 0644 "${BUNDLE_DIR}/nexus/compose.yaml" "${NEXUS_HOME}/compose.yaml"
 install -m 0644 -o 200 -g 200 "${BUNDLE_DIR}/nexus/nexus.properties" "${NEXUS_DATA}/etc/nexus.properties"
 sed -i "s/^application-port-ssl=.*/application-port-ssl=${NEXUS_PORT}/" "${NEXUS_DATA}/etc/nexus.properties"
-# Non-secret runtime settings keep a later plain compose up consistent.
 printf 'NEXUS_IMAGE=%s\nNEXUS_PORT=%s\nNEXUS_DATA=%s\nNEXUS_HEAP=%s\nNEXUS_DIRECT_MEMORY=%s\n' \
   "${NEXUS_IMAGE}" "${NEXUS_PORT}" "${NEXUS_DATA}" "${NEXUS_HEAP}" "${NEXUS_DIRECT_MEMORY}" > "${NEXUS_HOME}/.env"
 chmod 0644 "${NEXUS_HOME}/.env"

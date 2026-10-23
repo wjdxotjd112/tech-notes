@@ -210,7 +210,7 @@ Runner가 실행하는 것은 결국 저장소의 셸 명령이다. Workflow를 
 
 Nexus는 `runner-role`, `download-role`, 관리자 역할의 세 구분으로 시작할 수 있다. 역할 하나를 여러 개인 계정에 연결하되 공유 비밀번호 하나로 모든 사람을 묶지 않는다. Runner 콘텐츠 권한과 Nexus 서버 관리자 권한도 구분한다. [Nexus privileges](https://help.sonatype.com/en/privileges.html)
 
-주소·경로·저장소 이름은 `/etc/gitea-runner-env/bundle-pipeline.env`와 공통 서비스 설정으로 모으고, 비밀번호·API Token은 Gitea Actions Secrets로 전달한다. 소스 코드에 같은 URL의 기본값을 여러 번 넣지 않는다. host 방식 Runner는 동시 실행 1개를 유지하고, root 작업은 제한된 wrapper로만 수행한다.
+주소·경로·저장소 이름은 `/etc/gitea-runner-env/services.env` 한 곳에서 지정한다. `bundle-pipeline.env`는 이 값을 읽어 URL과 파생 경로를 계산한다. 비밀번호·API Token은 Gitea Actions Secrets로 전달한다. 소스 코드에 같은 URL의 기본값을 여러 번 넣지 않는다. host 방식 Runner는 동시 실행 1개를 유지하고, root 작업은 제한된 wrapper로만 수행한다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>Git에 넣지 않을 파일과 사내 설치 인증</summary>

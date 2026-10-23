@@ -92,7 +92,6 @@ else
   nexus_curl -fsS --upload-file "${release_info}" \
     "${repository_url}/${version_path}/release-info.yaml"
 fi
-# Channel pointers are published only after the Bundle upload succeeds.
 
 nexus_curl -fsS "${repository_url}/${manifest_path}" -o "${downloaded_manifest}"
 test "$(sha256sum "${downloaded_manifest}" | awk '{print $1}')" = "${manifest_sha256}"

@@ -96,8 +96,6 @@ bundle_url="${NEXUS_URL}/repository/${BUNDLE_REPOSITORY}/releases/${release_vers
 remote_bundle_status="$(nexus_curl -sSI -o /dev/null -w '%{http_code}' "${bundle_url}")"
 remote_checksum_status="$(nexus_curl -sSI -o /dev/null -w '%{http_code}' "${bundle_url}.sha256")"
 if [[ "${remote_bundle_status}" == 200 && "${remote_checksum_status}" == 200 ]]; then
-  # A re-run can switch PR labels from skip to full. Restore the SAME TAR,
-  # rather than rebuilding it with newer templates or tools.
   expected_bundle_sha="$(nexus_curl -fsS "${bundle_url}.sha256" | awk '{print $1; exit}')"
   [[ "${expected_bundle_sha}" =~ ^[0-9a-f]{64}$ ]]
   if [[ ! -s "${bundle_tar}" ]]; then
@@ -186,7 +184,6 @@ echo "[1/5] Reuse Workflow source: ${git_ref}"
 [[ -z "$(source_git status --porcelain)" ]]
 [[ "$(runuser -u "${RUNNER_USER}" -- sha256sum "${source_dir}/release/manifest.yaml" | awk '{print $1}')" == "${expected_manifest_sha}" ]]
 
-# Copy with Runner permissions; keep the shallow .git but not credentials/hooks.
 chmod 0711 "${work_root}"
 install -d -o "${RUNNER_USER}" -g "${RUNNER_GROUP}" -m 0700 "${bundle_dir}/git/init-container"
 runuser -u "${RUNNER_USER}" -- cp -a --no-preserve=ownership \

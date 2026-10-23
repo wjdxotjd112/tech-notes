@@ -150,9 +150,6 @@ awk -F '\t' -v line="${release_line}" '
   }
 ' "${assets_file}" | sort -Vu -r > "${line_index}"
 
-# Nexus search indexing is eventually consistent. Always include the release
-# uploaded by this run so channel/retention calculation does not depend on the
-# search index becoming current immediately.
 printf '%s\n' "${release}" >> "${line_index}"
 sort -Vu -r -o "${line_index}" "${line_index}"
 

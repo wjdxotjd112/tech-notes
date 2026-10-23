@@ -47,7 +47,6 @@ printf '%s %s\n' "${alias_path}" "${target_url}" >> "${map_temp}"
 chmod 0644 "${map_temp}"
 mv -f -- "${map_temp}" "${HAPROXY_MAP_FILE}"
 
-# Runtime update avoids interrupting an in-progress multi-GiB download.
 response="$(printf '%s map %s %s %s\n' "${map_action}" "${HAPROXY_MAP_FILE}" "${alias_path}" "${target_url}" \
   | socat -t 5 - "UNIX-CONNECT:${HAPROXY_SOCKET}")"
 [[ -z "${response}" || "${response}" == *"New entry added"* ]] || {

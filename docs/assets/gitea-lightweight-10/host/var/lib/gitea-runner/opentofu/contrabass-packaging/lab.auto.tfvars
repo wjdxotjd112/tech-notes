@@ -1,4 +1,3 @@
-# Site-specific VMware values live here, not in variables.tf.
 vcenter_server  = "203.0.113.10"
 datacenter_name = "Datacenter"
 host_name       = "203.0.113.11"

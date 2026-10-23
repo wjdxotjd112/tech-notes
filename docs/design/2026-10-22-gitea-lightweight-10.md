@@ -95,7 +95,7 @@ release-platform-config/
 
 **host 전체를 `/`에 한 번에 덮어쓰지 않는다.** 아래 순서대로 파일을 설치한다. 새 셸을 열었다면 `CONFIG_SRC`를 다시 지정하고 `/etc/gitea-runner-env/bundle-pipeline.env`를 읽는다. 6절 이후에는 `SEED_DIR=/root/release-seed/contrabass-engine-deploy`도 다시 지정한다.
 
-먼저 Runner 계정과 환경설정 경로를 만든다. `nologin` 계정도 systemd와 `sudo -u`로 명령을 실행할 수 있다.
+먼저 Runner 계정과 환경설정 파일을 설치한다. `nologin` 계정도 systemd와 `sudo -u`로 명령을 실행할 수 있다. 주소·포트·저장소·계정·데이터 경로는 **`services.env` 한 곳에서 수정한다.** `bundle-pipeline.env`는 이 값을 읽어 URL과 파생 경로를 계산하므로 직접 수정하지 않는다.
 
 ```bash title="Runner 사용자와 통합 설정 설치"
 useradd --system --user-group --home-dir /var/lib/gitea-runner \
@@ -105,15 +105,12 @@ install -m 0640 -o root -g gitea-runner \
   "${CONFIG_SRC}/host/etc/gitea-runner-env/services.env" /etc/gitea-runner-env/services.env
 install -m 0640 -o root -g gitea-runner \
   "${CONFIG_SRC}/host/etc/gitea-runner-env/bundle-pipeline.env" /etc/gitea-runner-env/bundle-pipeline.env
-vi /etc/gitea-runner-env/services.env
-vi /etc/gitea-runner-env/bundle-pipeline.env
 ```
 
 <details class="analysis-toggle" markdown="1">
-<summary>/etc/gitea-runner-env/services.env — 전체 내용</summary>
+<summary>/etc/gitea-runner-env/services.env — 사용자가 수정할 설정</summary>
 
-<div class="highlight" data-source-path="host/etc/gitea-runner-env/services.env"><pre><code><span class="c1"># Compose와 HAProxy가 함께 읽는다. 비밀번호를 넣지 않는다.</span>
-<span class="nv">SERVER_HOST</span><span class="o">=</span><span class="m">192</span>.0.2.10
+<div class="highlight" data-source-path="host/etc/gitea-runner-env/services.env"><pre><code><span class="nv">SERVER_HOST</span><span class="o">=</span><span class="m">192</span>.0.2.10
 <span class="nv">GITEA_HTTPS_PORT</span><span class="o">=</span><span class="m">30000</span>
 <span class="nv">GITEA_SSH_PORT</span><span class="o">=</span><span class="m">222</span>
 <span class="nv">NEXUS_HTTPS_PORT</span><span class="o">=</span><span class="m">55555</span>
@@ -139,47 +136,24 @@ vi /etc/gitea-runner-env/bundle-pipeline.env
 <span class="nv">RAW_REPOSITORY</span><span class="o">=</span>raw-hosted
 <span class="nv">DOCKER_REPOSITORY</span><span class="o">=</span>docker-hosted
 <span class="nv">STAGING_REPOSITORY</span><span class="o">=</span>raw-release-staging
-</code></pre></div>
 
-</details>
-
-<details class="analysis-toggle" markdown="1">
-<summary>/etc/gitea-runner-env/bundle-pipeline.env — 전체 내용</summary>
-
-<div class="highlight" data-source-path="host/etc/gitea-runner-env/bundle-pipeline.env"><pre><code><span class="c1"># root 소유. Secrets는 Workflow에서 전달한다.</span>
-<span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/services.env
-<span class="nv">NEXUS_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">NEXUS_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
-<span class="nv">GITEA_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">GITEA_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
 <span class="nv">GITEA_REPOSITORY</span><span class="o">=</span>platform/private-cloud-v4
-<span class="nv">GITEA_REPO_URL</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_URL</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GITEA_REPOSITORY</span><span class="si">}</span><span class="s2">.git"</span>
 <span class="nv">RELEASE_BRANCH</span><span class="o">=</span>master
 <span class="nv">TEST_SKIP_LABEL</span><span class="o">=</span>release:skip-test
-<span class="c1"># 신규 환경은 비운다. 승인 확인을 피하려고 새 Tag를 추가하지 않는다.</span>
 <span class="nv">LEGACY_RELEASE_TAGS</span><span class="o">=</span><span class="s2">""</span>
 <span class="nv">NEXUS_USER</span><span class="o">=</span>release-ci
-<span class="nv">PUBLIC_RELEASE_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">RELEASE_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
 
 <span class="nv">BUNDLE_WORK_DIR</span><span class="o">=</span>/data/private-release
 <span class="nv">RAW_CACHE_DIR</span><span class="o">=</span>/data/private-release-cache/raw/sha256
 <span class="nv">BUNDLE_BUILDER_DIR</span><span class="o">=</span>/opt/gitea/bundle-builder
-<span class="nv">NEXUS_BASE_IMAGE</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">/nexus3-3.96.1-image.tar"</span>
-<span class="nv">TEMPLATE_DIR</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">/templates"</span>
 <span class="nv">RELEASE_KEEP_COUNT</span><span class="o">=</span><span class="m">3</span>
 
-<span class="c1"># 자체 서명 재현 구성. 사내 CA 신뢰 구성 후에는 false로 바꾼다.</span>
 <span class="nv">TLS_SKIP_VERIFY</span><span class="o">=</span><span class="nb">true</span>
 <span class="nv">HTTP_CONNECT_TIMEOUT</span><span class="o">=</span><span class="m">10</span>
 <span class="nv">HTTP_RETRY_COUNT</span><span class="o">=</span><span class="m">3</span>
-<span class="nv">HAPROXY_MAP_FILE</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RELEASE_MAP_FILE</span><span class="si">}</span><span class="s2">"</span>
-<span class="nv">HAPROXY_SOCKET</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RELEASE_SOCKET</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="nv">RUNNER_USER</span><span class="o">=</span>gitea-runner
-<span class="nv">RUNNER_GROUP</span><span class="o">=</span>gitea-runner
-<span class="nv">RUNNER_WORKSPACE</span><span class="o">=</span>/var/lib/gitea-runner/workspace
 <span class="nv">TOFU_PROJECT_DIR</span><span class="o">=</span>/var/lib/gitea-runner/opentofu/contrabass-packaging
 <span class="nv">TOFU_SSH_PRIVATE_KEY</span><span class="o">=</span>/var/lib/gitea-runner/.ssh/id_rsa
-<span class="nv">TOFU_SSH_PUBLIC_KEY</span><span class="o">=</span>/var/lib/gitea-runner/.ssh/id_rsa.pub
-
 <span class="nv">OPENSTACK_TEST_DIR</span><span class="o">=</span>/var/lib/gitea-runner/opentofu/openstack-smoke
 <span class="nv">OPENSTACK_IMAGE_FILE</span><span class="o">=</span>noble-qemu-okestro2018.qcow2
 <span class="nv">OPENSTACK_AUTH_URL</span><span class="o">=</span>https://192.0.2.100:15000/v3
@@ -187,20 +161,63 @@ vi /etc/gitea-runner-env/bundle-pipeline.env
 <span class="nv">OPENSTACK_PROJECT_NAME</span><span class="o">=</span>admin
 <span class="nv">OPENSTACK_USER_DOMAIN_NAME</span><span class="o">=</span>Default
 <span class="nv">OPENSTACK_PROJECT_DOMAIN_NAME</span><span class="o">=</span>Default
-<span class="nb">export</span><span class="w"> </span><span class="nv">OS_INSECURE</span><span class="o">=</span><span class="nb">true</span>
+<span class="nv">OS_INSECURE</span><span class="o">=</span><span class="nb">true</span>
+
+<span class="nv">BACKUP_HOST</span><span class="o">=</span>release-services
+<span class="nv">STAGING_DIR</span><span class="o">=</span>/data/release-service-backup/staging
+<span class="nv">RESTIC_REPOSITORY</span><span class="o">=</span>sftp:backup-store:/srv/backup/release-services
+<span class="nv">RESTIC_PASSWORD_FILE</span><span class="o">=</span>/etc/release-backup/restic-password
+<span class="nv">SERVICE_IMAGES_DIR</span><span class="o">=</span>/opt/gitea/service-images
 </code></pre></div>
 
 </details>
 
-| 먼저 바꿀 값 | 의미 |
+<details class="analysis-toggle" markdown="1">
+<summary>/etc/gitea-runner-env/bundle-pipeline.env — 자동 계산용, 수정하지 않음</summary>
+
+<div class="highlight" data-source-path="host/etc/gitea-runner-env/bundle-pipeline.env"><pre><code><span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/services.env
+<span class="nv">NEXUS_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">NEXUS_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
+<span class="nv">GITEA_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">GITEA_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
+<span class="nv">GITEA_REPO_URL</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_URL</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GITEA_REPOSITORY</span><span class="si">}</span><span class="s2">.git"</span>
+<span class="nv">PUBLIC_RELEASE_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">RELEASE_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
+<span class="nv">NEXUS_BASE_IMAGE</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">/nexus3-3.96.1-image.tar"</span>
+<span class="nv">TEMPLATE_DIR</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">/templates"</span>
+<span class="nv">HAPROXY_MAP_FILE</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RELEASE_MAP_FILE</span><span class="si">}</span><span class="s2">"</span>
+<span class="nv">HAPROXY_SOCKET</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RELEASE_SOCKET</span><span class="si">}</span><span class="s2">"</span>
+<span class="nv">TOFU_SSH_PUBLIC_KEY</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">TOFU_SSH_PRIVATE_KEY</span><span class="si">}</span><span class="s2">.pub"</span>
+<span class="nv">RUNNER_USER</span><span class="o">=</span>gitea-runner
+<span class="nv">RUNNER_GROUP</span><span class="o">=</span>gitea-runner
+<span class="nv">RUNNER_WORKSPACE</span><span class="o">=</span>/var/lib/gitea-runner/workspace
+<span class="nb">export</span><span class="w"> </span>OS_INSECURE
+</code></pre></div>
+
+</details>
+
+| services.env에서 확인할 값 | 의미 |
 | --- | --- |
 | SERVER_HOST | Gitea·Nexus·다운로드 공통 IP 또는 DNS |
+| GITEA_HTTPS_PORT / GITEA_SSH_PORT / NEXUS_HTTPS_PORT / RELEASE_HTTPS_PORT | 외부에서 접속할 포트 |
 | GITEA_REPOSITORY | 실제 소유자/저장소. 예시 `platform/private-cloud-v4` |
+| RELEASE_BRANCH / TEST_SKIP_LABEL | 릴리스 브랜치와 시험 생략 PR 라벨 |
 | NEXUS_USER | 뒤에서 생성할 CI 전용 Nexus 사용자 |
+| MANIFEST_REPOSITORY / BUNDLE_REPOSITORY / RAW_REPOSITORY / DOCKER_REPOSITORY / STAGING_REPOSITORY | Nexus에 만들 Repository 이름 |
 | 데이터·캐시·작업 경로 | 용량을 확보한 실제 마운트 경로 |
 | OPENSTACK_AUTH_URL | 시험 OpenStack의 Keystone VIP |
+| GITEA_IMAGE / POSTGRES_IMAGE / NEXUS_IMAGE | Gitea·DB·Nexus 서비스 실행 버전. 같은 버전으로 구축하면 기본값 유지 |
+| RELEASE_KEEP_COUNT | 계열별 최종 TAR 보관 개수. 기본값 3 |
 
-`services.env`는 단순 `KEY=value` 형식으로 Compose·systemd도 읽는다. `bundle-pipeline.env`는 Bash가 앞 파일을 읽고 URL·파이프라인 경로를 구성한다. 비밀번호는 어느 파일에도 넣지 않는다.
+`services.env`는 Compose·systemd·Bash가 함께 읽는 `KEY=value` 파일이다. 이미지 변수에는 실제 이미지 파일이 아니라 **서비스를 실행할 이미지 이름·태그·digest**가 들어 있다. 제품 배포용 이미지 목록은 `release/manifest.yaml`에서 관리한다.
+
+`bundle-pipeline.env`는 Bash에서만 읽는다. 예를 들어 `SERVER_HOST`와 `NEXUS_HTTPS_PORT`를 합쳐 `NEXUS_URL`을 만든다. 주소를 두 파일에 따로 입력하지 않는다. `LEGACY_RELEASE_TAGS`는 신규 환경에서 비워 두며 승인 확인을 피하는 용도로 사용하지 않는다. 마지막 백업 항목은 14절에서 원격 백업을 활성화할 때 설정한다. 비밀번호·토큰은 이 파일에 넣지 않는다.
+
+`/etc/gitea-runner-env/services.env`를 편집기로 열어 실제 환경에 맞게 저장한 뒤, 아래 명령으로 문법과 계산된 접속 주소를 확인한다. `source`는 설정을 읽는 명령이지 편집하는 명령이 아니다.
+
+```bash title="설정 확인"
+bash -n /etc/gitea-runner-env/services.env
+bash -n /etc/gitea-runner-env/bundle-pipeline.env
+source /etc/gitea-runner-env/bundle-pipeline.env
+printf '%s\n' "Gitea: ${GITEA_REPO_URL}" "Nexus: ${NEXUS_URL}" "Download: ${PUBLIC_RELEASE_URL}"
+```
 
 포트는 외부 포워딩과 컨테이너 내부 포트를 구분한다. 이 예시에서 Gitea 내부는 30000, Nexus 내부는 55555다. 외부 포트만 바꾸면 Compose 매핑과 접속 URL이 이를 반영한다. 내부 포트까지 바꾸려면 대응 설정도 수정해야 한다.
 
@@ -260,7 +277,7 @@ cat "${GITEA_CERT_DIR}/gitea.crt" "${GITEA_CERT_DIR}/gitea.key" > "${GITEA_CERT_
 chmod 0600 "${GITEA_CERT_DIR}/gitea.pem"
 ```
 
-자체 서명용 `TLS_SKIP_VERIFY=true`, Runner의 `insecure: true`, `OS_INSECURE=true`는 대상이 서로 다르다. 사내 CA를 신뢰하도록 준비한 뒤에는 클라이언트별 인증서 검증을 켠다. 검증 생략을 외부 공개 서비스의 기본 보안 설정으로 사용하지 않는다.
+자체 서명용 `TLS_SKIP_VERIFY=true`, Runner의 `insecure: true`, `OS_INSECURE=true`는 대상이 서로 다르다. TLS_SKIP_VERIFY와 OS_INSECURE는 services.env에서 지정한다. 사내 CA를 신뢰하도록 준비한 뒤에는 클라이언트별 인증서 검증을 켠다. 검증 생략을 외부 공개 서비스의 기본 보안 설정으로 사용하지 않는다.
 
 ---
 
@@ -412,7 +429,6 @@ curl -kfsS "https://${SERVER_HOST}:${GITEA_HTTPS_PORT}/api/healthz"
 <span class="w">    </span><span class="nt">restart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unless-stopped</span>
 
 <span class="w">    </span><span class="nt">ports</span><span class="p">:</span>
-<span class="w">      </span><span class="c1"># Nexus Web UI 및 REST API - HTTPS</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"${NEXUS_HTTPS_PORT}:55555"</span>
 
 <span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
@@ -644,7 +660,7 @@ unset NEXUS_PASSWORD
 
 Gitea에 소유자와 빈 private Repository를 만든다. 예시는 `platform/private-cloud-v4`다. README 자동 생성은 끄고 기본 브랜치는 master로 한다. 예전 사용자·PR·이력을 복제하는 것이 아니라 새 운영 저장소의 초기 코드를 준비하는 절차다.
 
-Repository의 **Settings → Repository → Advanced Settings**에서도 Actions 사용이 켜져 있는지 확인한다. 서버의 Actions 활성화와 저장소의 실행 허용을 구분한다. 조직으로 운영한다면 개발팀·검토자 팀에 해당 저장소의 Code·Pull Requests 권한을 명시하고, CI 읽기 계정은 관리자 팀에 넣지 않는다.
+Repository의 **Settings → Repository → Advanced Settings**에서도 Actions 사용이 켜져 있는지 확인한다. 서버의 Actions 활성화와 저장소의 실행 허용을 구분한다. 조직으로 운영한다면 개발팀·검토자 팀에 해당 저장소의 Code·Pull Requests 권한을 명시하고, CI 읽기 계정은 관리자 팀에 넣지 않는다. 최초 commit 전에 Git의 user.name과 user.email을 설정한다.
 
 ```bash title="기존 .git을 섞지 않고 새 저장소의 초기 코드 준비"
 install -d -m 0700 /root/private-cloud-v4
@@ -655,7 +671,6 @@ install -d .gitea/workflows
 install -m 0644 "${CONFIG_SRC}/repository/workflows/publish-manifest.yaml" .gitea/workflows/publish-manifest.yaml
 install -m 0644 "${CONFIG_SRC}/repository/gitignore" .gitignore
 git init -b master
-# 본인의 Git user.name / user.email 설정 후 commit
 git add .
 git commit -m 'Initialize release platform source'
 source /etc/gitea-runner-env/bundle-pipeline.env
@@ -890,7 +905,7 @@ Repository의 **Settings → Actions → Secrets**에 등록한다.
 
 Runner 등록 Token은 다음 절의 등록에만 사용한다. REPO_READ_TOKEN에 넣지 않는다. `.runner`도 Git 인증용 파일이 아니다. Secrets를 호스트 `.secret`이나 Git 코드에 다시 저장하지 않는다.
 
-skip은 VMware·OpenStack을 쓰지 않지만 Git과 Nexus 인증은 필요하다. Nexus 사용자 이름은 `bundle-pipeline.env`와 실제 생성한 계정을 맞춘다.
+skip은 VMware·OpenStack을 쓰지 않지만 Git과 Nexus 인증은 필요하다. Nexus 사용자 이름은 `services.env`의 `NEXUS_USER`와 실제 생성한 계정을 맞춘다.
 
 </div>
 
@@ -973,8 +988,6 @@ skip은 VMware·OpenStack을 쓰지 않지만 Git과 Nexus 인증은 필요하�
 
 <span class="na">LimitNOFILE</span><span class="o">=</span><span class="s">65536</span>
 <span class="na">UMask</span><span class="o">=</span><span class="s">0077</span>
-<span class="c1"># sudo is required by the two root-owned release wrappers.</span>
-<span class="c1"># NoNewPrivileges would break those wrappers.</span>
 <span class="na">PrivateTmp</span><span class="o">=</span><span class="s">true</span>
 <span class="na">ProtectKernelTunables</span><span class="o">=</span><span class="s">true</span>
 <span class="na">ProtectKernelModules</span><span class="o">=</span><span class="s">true</span>
@@ -1033,10 +1046,8 @@ sudo -u gitea-runner ssh-keygen -t rsa -b 4096 -N '' \
 <summary>/opt/gitea/bundle-builder/common.sh — 전체 내용</summary>
 
 <div class="highlight" data-source-path="host/opt/gitea/bundle-builder/common.sh"><pre><code><span class="ch">#!/bin/bash</span>
-<span class="c1"># Shared configuration and helpers. No downloads or mutations when sourced.</span>
 <span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/bundle-pipeline.env
 
-<span class="c1"># Keep passwords/tokens out of curl's process arguments. FD contents are temporary.</span>
 http_curl<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">tls</span><span class="o">=()</span>
 <span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TLS_SKIP_VERIFY</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">tls</span><span class="o">=(</span>--insecure<span class="o">)</span>
@@ -1081,7 +1092,6 @@ yaml_value<span class="o">()</span><span class="w"> </span><span class="o">{</sp
 
 file_sha256<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>sha256sum<span class="w"> </span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'{print $1}'</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
 
-<span class="c1"># Return 1 only for a missing asset; authentication/server errors stop the job.</span>
 nexus_get_optional<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span><span class="nb">local</span><span class="w"> </span>status
 <span class="w">  </span><span class="nv">status</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>nexus_curl<span class="w"> </span>-sS<span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span><span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
@@ -1099,8 +1109,6 @@ require_commands<span class="o">()</span><span class="w"> </span><span class="o"
 <span class="w">  </span><span class="k">done</span>
 <span class="o">}</span>
 
-<span class="c1"># One policy for tag pushes and manual retries. Never treat API failure as skip.</span>
-<span class="c1"># Read CURRENT PR labels on each run; do not modify an existing Git tag.</span>
 select_test_mode<span class="o">()</span><span class="w"> </span><span class="o">(</span>
 <span class="w">  </span><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
 <span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">source_dir</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="w"> </span><span class="nv">tag</span><span class="o">=</span><span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span><span class="w"> </span><span class="nv">output</span><span class="o">=</span><span class="s2">"</span><span class="nv">$3</span><span class="s2">"</span><span class="w"> </span>commit<span class="w"> </span>release<span class="w"> </span>line<span class="w"> </span>api<span class="w"> </span>scratch<span class="w"> </span>status<span class="w"> </span><span class="nv">mode</span><span class="o">=</span>full<span class="w"> </span>reason<span class="w"> </span><span class="nv">pr</span><span class="o">=</span><span class="m">0</span>
@@ -1139,7 +1147,6 @@ select_test_mode<span class="o">()</span><span class="w"> </span><span class="o"
 <span class="w">    </span><span class="o">}</span>
 <span class="w">    </span><span class="nv">pr</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.number'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="k">)</span><span class="s2">"</span>
 <span class="w">    </span>gitea_get<span class="w"> </span><span class="s2">"pulls/</span><span class="si">${</span><span class="nv">pr</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
-<span class="w">    </span><span class="c1"># A closed PR's head.sha follows its branch. Use the immutable merge parent.</span>
 <span class="w">    </span>gitea_get<span class="w"> </span><span class="s2">"git/commits/</span><span class="si">${</span><span class="nv">commit</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/merge.json"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span><span class="s1">'.parents | length'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/merge.json"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
 <span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Release PRs must use a normal merge commit (not squash/rebase).'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
@@ -1164,10 +1171,8 @@ select_test_mode<span class="o">()</span><span class="w"> </span><span class="o"
 <span class="w">      </span><span class="s1">'any(.labels[]?; .name == $label)'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span>skip<span class="p">;</span><span class="w"> </span><span class="k">fi</span>
 <span class="w">    </span><span class="nv">reason</span><span class="o">=</span>pr-label
 <span class="w">  </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">" </span><span class="si">${</span><span class="nv">LEGACY_RELEASE_TAGS</span><span class="k">:-</span><span class="si">}</span><span class="s2"> "</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s2">" </span><span class="si">${</span><span class="nv">tag</span><span class="si">}</span><span class="s2"> "</span>*<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">    </span><span class="c1"># Preserve retries of already-published pre-policy versions, without inventing a PR.</span>
 <span class="w">    </span><span class="nv">reason</span><span class="o">=</span>historical-tag
 <span class="w">  </span><span class="k">else</span>
-<span class="w">    </span><span class="c1"># A missing PR is allowed ONLY for an older release line, not new master releases.</span>
 <span class="w">    </span>gitea_get<span class="w"> </span><span class="s2">"raw/release/manifest.yaml?ref=</span><span class="si">${</span><span class="nv">RELEASE_BRANCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/master.yaml"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="w">    </span><span class="nv">master_release</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>yaml_value<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/master.yaml"</span><span class="w"> </span>release<span class="k">)</span><span class="s2">"</span>
 <span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">master_release</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">0</span>-9<span class="o">]</span>+<span class="se">\.</span><span class="o">[</span><span class="m">0</span>-9<span class="o">]</span>+<span class="se">\.</span><span class="o">[</span><span class="m">0</span>-9<span class="o">]</span>+$<span class="w"> </span><span class="o">]]</span>
@@ -1289,7 +1294,6 @@ cleanup<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span>nexus_curl<span class="w"> </span>-fsS<span class="w"> </span>--upload-file<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">release_info</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="s2">"</span><span class="si">${</span><span class="nv">repository_url</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">version_path</span><span class="si">}</span><span class="s2">/release-info.yaml"</span>
 <span class="k">fi</span>
-<span class="c1"># Channel pointers are published only after the Bundle upload succeeds.</span>
 
 nexus_curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">repository_url</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">manifest_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">downloaded_manifest</span><span class="si">}</span><span class="s2">"</span>
 <span class="nb">test</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>sha256sum<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">downloaded_manifest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'{print $1}'</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">manifest_sha256</span><span class="si">}</span><span class="s2">"</span>
@@ -1402,8 +1406,6 @@ nexus_curl<span class="w"> </span>-fsSL<span class="w"> </span><span class="se">
 <span class="nv">remote_bundle_status</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>nexus_curl<span class="w"> </span>-sSI<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_url</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
 <span class="nv">remote_checksum_status</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>nexus_curl<span class="w"> </span>-sSI<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_url</span><span class="si">}</span><span class="s2">.sha256"</span><span class="k">)</span><span class="s2">"</span>
 <span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">remote_bundle_status</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">200</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">remote_checksum_status</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">200</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">  </span><span class="c1"># A re-run can switch PR labels from skip to full. Restore the SAME TAR,</span>
-<span class="w">  </span><span class="c1"># rather than rebuilding it with newer templates or tools.</span>
 <span class="w">  </span><span class="nv">expected_bundle_sha</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>nexus_curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_url</span><span class="si">}</span><span class="s2">.sha256"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'{print $1; exit}'</span><span class="k">)</span><span class="s2">"</span>
 <span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_bundle_sha</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="o">]]</span>
 <span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_tar</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
@@ -1492,7 +1494,6 @@ install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</s
 <span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>source_git<span class="w"> </span>status<span class="w"> </span>--porcelain<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
 <span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>runuser<span class="w"> </span>-u<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUNNER_USER</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--<span class="w"> </span>sha256sum<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_dir</span><span class="si">}</span><span class="s2">/release/manifest.yaml"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'{print $1}'</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_manifest_sha</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
 
-<span class="c1"># Copy with Runner permissions; keep the shallow .git but not credentials/hooks.</span>
 chmod<span class="w"> </span><span class="m">0711</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">"</span>
 install<span class="w"> </span>-d<span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUNNER_USER</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUNNER_GROUP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-m<span class="w"> </span><span class="m">0700</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/git/init-container"</span>
 runuser<span class="w"> </span>-u<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUNNER_USER</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--<span class="w"> </span>cp<span class="w"> </span>-a<span class="w"> </span>--no-preserve<span class="o">=</span>ownership<span class="w"> </span><span class="se">\</span>
@@ -1778,9 +1779,6 @@ awk<span class="w"> </span>-F<span class="w"> </span><span class="s1">'\t'</span
 <span class="s1">  }</span>
 <span class="s1">'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">assets_file</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-Vu<span class="w"> </span>-r<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line_index</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="c1"># Nexus search indexing is eventually consistent. Always include the release</span>
-<span class="c1"># uploaded by this run so channel/retention calculation does not depend on the</span>
-<span class="c1"># search index becoming current immediately.</span>
 <span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">release</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line_index</span><span class="si">}</span><span class="s2">"</span>
 sort<span class="w"> </span>-Vu<span class="w"> </span>-r<span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line_index</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line_index</span><span class="si">}</span><span class="s2">"</span>
 
@@ -1879,7 +1877,6 @@ cmp<span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><s
 <span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="k">fi</span>
 
-<span class="c1"># Clear inherited variables before reading the password. Never place it in argv.</span>
 <span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/bundle-pipeline.env
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="p">:?Set BUNDLE_BUILDER_DIR in bundle-pipeline.env</span><span class="si">}</span><span class="s2">"</span>
 <span class="nb">exec</span><span class="w"> </span>env<span class="w"> </span>-i<span class="w"> </span><span class="nv">PATH</span><span class="o">=</span>/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin<span class="w"> </span><span class="nv">HOME</span><span class="o">=</span>/root<span class="w"> </span><span class="se">\</span>
@@ -1947,7 +1944,6 @@ awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">alias_path
 chmod<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
 mv<span class="w"> </span>-f<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="c1"># Runtime update avoids interrupting an in-progress multi-GiB download.</span>
 <span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_action</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="p">|</span><span class="w"> </span>socat<span class="w"> </span>-t<span class="w"> </span><span class="m">5</span><span class="w"> </span>-<span class="w"> </span><span class="s2">"UNIX-CONNECT:</span><span class="si">${</span><span class="nv">HAPROXY_SOCKET</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
 <span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s2">"New entry added"</span>*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
@@ -1993,8 +1989,6 @@ nexus_curl<span class="w"> </span>-fsSIL<span class="w"> </span><span class="se"
 <span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"Enter an IP address or DNS name without a scheme or port."</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
 <span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="o">}</span>
-<span class="c1"># Verify the outer TAR with its .sha256 file before extraction.</span>
-<span class="c1"># Deployment checks required files, not every file in the extracted Git tree.</span>
 
 <span class="nb">echo</span><span class="w"> </span><span class="s2">"[1/3] Prepare private Nexus and import release artifacts"</span>
 bash<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/setup-private-environment.sh"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">nexus_host</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--accept-eula
@@ -2145,7 +2139,6 @@ install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </sp
 install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_DIR</span><span class="si">}</span><span class="s2">/nexus/compose.yaml"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_HOME</span><span class="si">}</span><span class="s2">/compose.yaml"</span>
 install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span>-o<span class="w"> </span><span class="m">200</span><span class="w"> </span>-g<span class="w"> </span><span class="m">200</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_DIR</span><span class="si">}</span><span class="s2">/nexus/nexus.properties"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DATA</span><span class="si">}</span><span class="s2">/etc/nexus.properties"</span>
 sed<span class="w"> </span>-i<span class="w"> </span><span class="s2">"s/^application-port-ssl=.*/application-port-ssl=</span><span class="si">${</span><span class="nv">NEXUS_PORT</span><span class="si">}</span><span class="s2">/"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DATA</span><span class="si">}</span><span class="s2">/etc/nexus.properties"</span>
-<span class="c1"># Non-secret runtime settings keep a later plain compose up consistent.</span>
 <span class="nb">printf</span><span class="w"> </span><span class="s1">'NEXUS_IMAGE=%s\nNEXUS_PORT=%s\nNEXUS_DATA=%s\nNEXUS_HEAP=%s\nNEXUS_DIRECT_MEMORY=%s\n'</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_IMAGE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_PORT</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DATA</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_HEAP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DIRECT_MEMORY</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_HOME</span><span class="si">}</span><span class="s2">/.env"</span>
 chmod<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_HOME</span><span class="si">}</span><span class="s2">/.env"</span>
@@ -2568,7 +2561,7 @@ visudo -cf /etc/sudoers.d/contrabass-engine-runner
 <details class="analysis-toggle" markdown="1">
 <summary>/etc/haproxy/bundle-channels.map — 전체 내용</summary>
 
-<div class="highlight" data-source-path="host/etc/haproxy/bundle-channels.map"><pre><code><span class="c1"># 최초에는 비워 둔다. 정상 게시 후 update-release-alias가 경로를 추가한다.</span>
+<div class="highlight" data-source-path="host/etc/haproxy/bundle-channels.map"><pre><code>
 </code></pre></div>
 
 </details>
@@ -3119,8 +3112,7 @@ tofu version
 <details class="analysis-toggle" markdown="1">
 <summary>/var/lib/gitea-runner/opentofu/contrabass-packaging/lab.auto.tfvars — 전체 내용</summary>
 
-<div class="highlight" data-source-path="host/var/lib/gitea-runner/opentofu/contrabass-packaging/lab.auto.tfvars"><pre><code><span class="c1"># Site-specific VMware values live here, not in variables.tf.</span>
-<span class="na">vcenter_server</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">"203.0.113.10"</span>
+<div class="highlight" data-source-path="host/var/lib/gitea-runner/opentofu/contrabass-packaging/lab.auto.tfvars"><pre><code><span class="na">vcenter_server</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">"203.0.113.10"</span>
 <span class="na">datacenter_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Datacenter"</span>
 <span class="na">host_name</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="s2">"203.0.113.11"</span>
 <span class="na">datastore_name</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">"ESXi-Local-SSD"</span>
@@ -3152,10 +3144,7 @@ tofu version
 <details class="analysis-toggle" markdown="1">
 <summary>/var/lib/gitea-runner/opentofu/contrabass-packaging/.terraform.lock.hcl — 전체 내용</summary>
 
-<div class="highlight" data-source-path="host/var/lib/gitea-runner/opentofu/contrabass-packaging/.terraform.lock.hcl"><pre><code><span class="c1"># This file is maintained automatically by "tofu init".</span>
-<span class="c1"># Manual edits may be lost in future updates.</span>
-
-<span class="err">provider</span><span class="w"> </span><span class="s2">"registry.opentofu.org/vmware/vsphere"</span><span class="w"> </span><span class="p">{</span>
+<div class="highlight" data-source-path="host/var/lib/gitea-runner/opentofu/contrabass-packaging/.terraform.lock.hcl"><pre><code><span class="err">provider</span><span class="w"> </span><span class="s2">"registry.opentofu.org/vmware/vsphere"</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="na">version</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"2.17.1"</span>
 <span class="w">  </span><span class="na">constraints</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"2.17.1"</span>
 <span class="w">  </span><span class="na">hashes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
@@ -3379,10 +3368,7 @@ tofu version
 <details class="analysis-toggle" markdown="1">
 <summary>/var/lib/gitea-runner/opentofu/openstack-smoke/.terraform.lock.hcl — 전체 내용</summary>
 
-<div class="highlight" data-source-path="host/var/lib/gitea-runner/opentofu/openstack-smoke/.terraform.lock.hcl"><pre><code><span class="c1"># This file is maintained automatically by "tofu init".</span>
-<span class="c1"># Manual edits may be lost in future updates.</span>
-
-<span class="err">provider</span><span class="w"> </span><span class="s2">"registry.opentofu.org/terraform-provider-openstack/openstack"</span><span class="w"> </span><span class="p">{</span>
+<div class="highlight" data-source-path="host/var/lib/gitea-runner/opentofu/openstack-smoke/.terraform.lock.hcl"><pre><code><span class="err">provider</span><span class="w"> </span><span class="s2">"registry.opentofu.org/terraform-provider-openstack/openstack"</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="na">version</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">"1.53.0"</span>
 <span class="w">  </span><span class="na">constraints</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"1.53.0"</span>
 <span class="w">  </span><span class="na">hashes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
@@ -3484,7 +3470,6 @@ provider 최초 설치는 외부 Registry 통신이 필요하다. 폐쇄된 Runn
 <span class="w">            </span><span class="no">"${GITEA_REPO_URL}" \</span>
 <span class="w">            </span><span class="no">source</span>
 <span class="w">          </span><span class="no">if [[ -z "${MANUAL_RELEASE_TAG}" ]]; then</span>
-<span class="w">            </span><span class="no"># Accept annotated tags too, while pinning this push event's commit.</span>
 <span class="w">            </span><span class="no">test "$(git -C source rev-parse HEAD)" = "$(git -C source rev-parse "${EVENT_COMMIT}^{commit}")"</span>
 <span class="w">          </span><span class="no">fi</span>
 
@@ -3919,25 +3904,20 @@ Nexus Cleanup Policies에 raw, Component Age 3일의 staging 전용 정책을 �
 
 계열별 최종 Bundle 3개는 게시 스크립트와 RELEASE_KEEP_COUNT=3이 관리한다. Raw·Docker 원본에 같은 기간 삭제를 적용하지 않는다. 삭제 표시한 파일의 물리 공간 반환은 compact가 담당한다.
 
-백업 설정·실행 명령·timer도 묶음에 포함했다. 별도 물리서버와 첫 수동 백업이 준비되기 전에는 timer를 켜지 않는다.
+백업 설정·실행 명령·timer도 묶음에 포함했다. 백업 저장소·임시 경로·비밀번호 파일 경로는 services.env의 마지막 항목에서 지정한다. backup.env는 공통 설정을 읽고 백업 명령에 필요한 값을 구성하므로 직접 수정하지 않는다. 별도 물리서버와 첫 수동 백업이 준비되기 전에는 timer를 켜지 않는다.
 
 <details class="analysis-toggle" markdown="1">
-<summary>/etc/gitea-runner-env/backup.env — 전체 내용</summary>
+<summary>/etc/gitea-runner-env/backup.env — 백업 실행용, 수정하지 않음</summary>
 
 <div class="highlight" data-source-path="host/etc/gitea-runner-env/backup.env"><pre><code><span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/services.env
-<span class="nv">BACKUP_HOST</span><span class="o">=</span>release-services
-<span class="nv">STAGING_DIR</span><span class="o">=</span>/data/release-service-backup/staging
-<span class="nb">export</span><span class="w"> </span><span class="nv">RESTIC_REPOSITORY</span><span class="o">=</span>sftp:backup-store:/srv/backup/release-services
-<span class="nb">export</span><span class="w"> </span><span class="nv">RESTIC_PASSWORD_FILE</span><span class="o">=</span>/etc/release-backup/restic-password
-<span class="nv">BUNDLE_BUILDER_DIR</span><span class="o">=</span>/opt/gitea/bundle-builder
+<span class="nb">export</span><span class="w"> </span>RESTIC_REPOSITORY<span class="w"> </span>RESTIC_PASSWORD_FILE
 <span class="nv">RUNNER_HOME</span><span class="o">=</span>/var/lib/gitea-runner
 <span class="nv">TOFU_ROOT</span><span class="o">=</span>/var/lib/gitea-runner/opentofu
-<span class="nv">SERVICE_IMAGES_DIR</span><span class="o">=</span>/opt/gitea/service-images
 <span class="nv">GITEA_HEALTH_URL</span><span class="o">=</span><span class="s2">"https://127.0.0.1:</span><span class="si">${</span><span class="nv">GITEA_HTTPS_PORT</span><span class="si">}</span><span class="s2">/api/healthz"</span>
 <span class="nv">NEXUS_HEALTH_URL</span><span class="o">=</span><span class="s2">"https://127.0.0.1:</span><span class="si">${</span><span class="nv">NEXUS_HTTPS_PORT</span><span class="si">}</span><span class="s2">/service/rest/v1/status"</span>
 <span class="nv">CONFIG_PATHS</span><span class="o">=(</span>
 <span class="w">  </span>root/compose
-<span class="w">  </span>data/gitea/certs
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_CERT_DIR</span><span class="p">#/</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span>etc/gitea-runner
 <span class="w">  </span>etc/gitea-runner-env
 <span class="w">  </span>etc/systemd/system/gitea-runner.service
@@ -3962,7 +3942,6 @@ Nexus Cleanup Policies에 raw, Component Age 3일의 staging 전용 정책을 �
 <span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
 <span class="nb">umask</span><span class="w"> </span><span class="m">077</span>
 
-<span class="c1"># root 전용 설정. 이 스크립트는 CI job에서 호출하지 않는다.</span>
 <span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/backup.env
 
 <span class="nb">exec</span><span class="w"> </span><span class="m">9</span>&gt;/run/lock/release-services-backup.lock
@@ -3978,7 +3957,6 @@ flock<span class="w"> </span>-n<span class="w"> </span><span class="m">9</span><
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_HEALTH_URL</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_HEALTH_URL</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span>
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_DB_USER</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_DB_NAME</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="c1"># --delete는 운영 데이터가 아니라 준비한 staging 하위 복사본에만 적용한다.</span>
 <span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">STAGING_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>/*<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">STAGING_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span>/<span class="w"> </span><span class="o">]]</span>
 <span class="o">[[</span><span class="w"> </span>-d<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">STAGING_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>!<span class="w"> </span>-L<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">STAGING_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
 <span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>realpath<span class="w"> </span>-e<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">STAGING_DIR</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">STAGING_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
@@ -4014,14 +3992,12 @@ copy_tree<span class="o">()</span><span class="w"> </span><span class="o">{</spa
 precopy<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="m">0</span>
 <span class="w">  </span>copy_tree<span class="w"> </span><span class="s2">"</span><span class="nv">$@</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">rc</span><span class="o">=</span><span class="nv">$?</span>
-<span class="w">  </span><span class="c1"># 가동 중 임시 파일이 사라진 경우의 24만 허용한다. 최종 동기화에서는 허용하지 않는다.</span>
 <span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">rc</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">rc</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">24</span><span class="w"> </span><span class="o">]]</span>
 <span class="o">}</span>
 
 wait_http<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">url</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span>
 <span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="o">((</span><span class="nv">attempt</span><span class="o">=</span><span class="m">0</span><span class="p">;</span><span class="w"> </span>attempt&lt;<span class="m">120</span><span class="p">;</span><span class="w"> </span>attempt++<span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<span class="w">    </span><span class="c1"># 자체 서명 인증서를 쓰는 내부 healthcheck다. 외부 통신에는 검증 생략을 적용하지 않는다.</span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span>curl<span class="w"> </span>-kfsS<span class="w"> </span>--connect-timeout<span class="w"> </span><span class="m">5</span><span class="w"> </span>--max-time<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
 <span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
 <span class="w">    </span><span class="k">fi</span>
@@ -4070,14 +4046,12 @@ precopy<span class="w"> </span><span class="s2">"</span><span class="si">${</spa
 precopy<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TOFU_ROOT</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>opentofu<span class="w"> </span>--exclude<span class="o">=</span>.terraform/<span class="w"> </span>--exclude<span class="o">=</span><span class="s1">'*.tfplan'</span><span class="w"> </span>--exclude<span class="o">=</span><span class="s1">'*.plan'</span><span class="w"> </span>--exclude<span class="o">=</span><span class="s1">'.ci.lock'</span>
 
 <span class="nb">echo</span><span class="w"> </span><span class="s1">'[2/5] Stop Runner gracefully, then quiesce Gitea and Nexus.'</span>
-<span class="c1"># Runner의 shutdown_timeout보다 systemd TimeoutStopSec를 길게 설정한다.</span>
 <span class="nv">runner_stopped</span><span class="o">=</span><span class="m">1</span>
 systemctl<span class="w"> </span>stop<span class="w"> </span>gitea-runner
 <span class="nv">gitea_stopped</span><span class="o">=</span><span class="m">1</span>
 nerdctl<span class="w"> </span>stop<span class="w"> </span>--time<span class="w"> </span><span class="m">120</span><span class="w"> </span>gitea<span class="w"> </span>&gt;/dev/null
 <span class="nv">nexus_stopped</span><span class="o">=</span><span class="m">1</span>
 nerdctl<span class="w"> </span>stop<span class="w"> </span>--time<span class="w"> </span><span class="m">120</span><span class="w"> </span>nexus<span class="w"> </span>&gt;/dev/null
-<span class="c1"># SIGKILL 종료를 정상 정지로 간주하지 않는다. 143은 SIGTERM 종료 코드다.</span>
 <span class="k">for</span><span class="w"> </span>container<span class="w"> </span><span class="k">in</span><span class="w"> </span>gitea<span class="w"> </span>nexus<span class="p">;</span><span class="w"> </span><span class="k">do</span>
 <span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>nerdctl<span class="w"> </span>inspect<span class="w"> </span>-f<span class="w"> </span><span class="s1">'&#123;&#123;.State.ExitCode&#125;&#125;'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">container</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="k">in</span>
 <span class="w">    </span><span class="m">0</span><span class="p">|</span><span class="m">143</span><span class="o">)</span><span class="w"> </span><span class="p">;;</span>
@@ -4179,16 +4153,15 @@ Host backup-store
 ```bash title="운영 서버 백업 준비"
 ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519_backup -N ''
 ssh-copy-id -i /root/.ssh/id_ed25519_backup.pub backup@backup.example.com
-install -d -m 0700 /etc/release-backup /data/release-service-backup/staging /opt/gitea/service-images
-touch /data/release-service-backup/staging/.release-backup-staging
-(set -o noclobber; umask 077; openssl rand -base64 48 > /etc/release-backup/restic-password)
 install -m 0600 "${CONFIG_SRC}/host/etc/gitea-runner-env/backup.env" /etc/gitea-runner-env/backup.env
+source /etc/gitea-runner-env/backup.env
+install -d -m 0700 "$(dirname "${RESTIC_PASSWORD_FILE}")" "${STAGING_DIR}" "${SERVICE_IMAGES_DIR}"
+touch "${STAGING_DIR}/.release-backup-staging"
+(set -o noclobber; umask 077; openssl rand -base64 48 > "${RESTIC_PASSWORD_FILE}")
 install -m 0750 "${CONFIG_SRC}/host/usr/local/sbin/backup-release-services" /usr/local/sbin/backup-release-services
 install -m 0644 "${CONFIG_SRC}"/host/etc/systemd/system/release-services-backup.* /etc/systemd/system/
-source /etc/gitea-runner-env/services.env
-nerdctl save -o /opt/gitea/service-images/bootstrap-images.tar "${GITEA_IMAGE}" "${POSTGRES_IMAGE}" "${NEXUS_IMAGE}"
-install -m 0755 /usr/local/bin/gitea-runner /opt/gitea/service-images/gitea-runner
-source /etc/gitea-runner-env/backup.env
+nerdctl save -o "${SERVICE_IMAGES_DIR}/bootstrap-images.tar" "${GITEA_IMAGE}" "${POSTGRES_IMAGE}" "${NEXUS_IMAGE}"
+install -m 0755 /usr/local/bin/gitea-runner "${SERVICE_IMAGES_DIR}/gitea-runner"
 restic init
 ```
 
