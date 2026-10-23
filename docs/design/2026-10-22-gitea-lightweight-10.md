@@ -401,16 +401,36 @@ nerdctl logs --tail 50 gitea
 curl -kfsS "https://${SERVER_HOST}:${GITEA_HTTPS_PORT}/api/healthz"
 ```
 
-브라우저에서 Gitea를 열고 초기 설치 화면의 PostgreSQL·외부 URL·SSH 포트를 확인한다. Compose에 지정한 값과 맞추고 첫 관리자를 만든다. 초기 설치를 마친 뒤 app.ini의 설치 잠금이 켜졌는지 확인한다.
+**브라우저에서 최초 설치와 관리자 생성**
 
-| 확인 항목 | 맞춰야 할 상태 |
-| --- | --- |
-| DB | db:5432, Gitea용 DB |
-| Root URL | 실제 `https://호스트:30000/` |
-| SSH Port | 외부 포트 222 |
-| Actions | 활성화 |
-| 자유 가입·익명 조회 | 비활성화 |
-| 데이터 | 컨테이너와 독립된 호스트 볼륨 |
+1. 브라우저에서 `https://서버주소:GITEA_HTTPS_PORT/`를 연다. 예시는 `https://192.0.2.10:30000/`다. 최초에는 이 기본 주소에서 설치 화면이 열린다. `/install`을 붙여 접속하지 않는다.
+2. 자체 서명 인증서를 쓰는 시험망이라면 브라우저 인증서 경고를 확인하고 해당 서버가 맞는지 대조한다. 사내 CA 인증서가 있으면 단말에서도 그 CA를 신뢰하도록 준비한다.
+3. 아래 표의 DB·서비스 주소가 Compose 설정과 같은지 확인한다. DB의 `root` 사용자와 Gitea 웹 관리자 계정은 서로 다른 계정이다.
+4. 화면 아래 **Administrator Account Settings**를 펼쳐 관리자 이름·이메일·비밀번호·비밀번호 확인을 입력한다. 관리자는 뒤에서 만들 조직 이름 `platform`과 다른 이름을 사용한다. 관리자 계정을 팀원들이 공동으로 쓰지 않는다.
+5. **Install Gitea**를 눌러 설치를 마친다. 설치 후 방금 만든 관리자 계정으로 로그인된 상태인지 확인하고, 로그인 화면이 나오면 해당 계정으로 로그인한다. 프로필 메뉴에 **Site Administration**이 보이는지 확인한다.
+
+| 설치 화면 항목 | 지정·확인할 값 | 주의 |
+| --- | --- | --- |
+| Database Type | PostgreSQL | SQLite로 새 DB를 만들지 않음 |
+| Database Host | `db:5432` | Compose 내부 서비스 이름. 물리서버 IP나 localhost로 바꾸지 않음 |
+| Database User / Name | `services.env`의 GITEA_DB_USER / GITEA_DB_NAME | 기본값은 root / gitea |
+| Database Password | Compose에서 준비한 DB 비밀번호 | Gitea 관리자 비밀번호와 구분. 자동 입력된 값 유지 |
+| Server Domain | SERVER_HOST | scheme·포트 없는 서버 IP 또는 DNS |
+| SSH Server Port | GITEA_SSH_PORT | 외부 SSH 포트. 기본값 222 |
+| Gitea HTTP Listen Port | `30000` | 이 구성의 컨테이너 내부 포트 |
+| Gitea Base URL | `https://SERVER_HOST:GITEA_HTTPS_PORT/` | 외부에서 접속할 HTTPS URL. 끝의 / 포함 |
+| Repository Root / Run User | 이미지가 설정한 기본값 | 컨테이너 내부 경로·계정을 호스트 root 경로로 바꾸지 않음 |
+
+이 구성은 자유 가입과 로그인하지 않은 조회를 막는다. 관리자 생성 후 일반 팀원은 가입 화면이 아니라 6-2절의 사용자 생성 절차로 등록한다. 이미 로그인 화면이나 저장소 목록이 나온다면 최초 설치가 끝난 상태이므로 설치를 다시 진행하지 않는다. [Gitea 1.25.4 최초 설치 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/install.tmpl)
+
+설치 잠금은 전체 app.ini를 출력하지 말고 해당 항목만 확인한다. true여야 한다. app.ini에는 DB 인증정보와 내부 키가 포함될 수 있으므로 그대로 공유하지 않는다.
+
+```bash title="최초 설치 완료 확인"
+source /etc/gitea-runner-env/bundle-pipeline.env
+grep -E '^[[:space:]]*INSTALL_LOCK[[:space:]]*=' "${GITEA_DATA_DIR}/gitea/conf/app.ini"
+```
+
+healthz 응답만으로 관리자 생성과 로그인이 끝났다고 판단하지 않는다. 로그인 제한 때문에 응답이 로그인 화면으로 이동할 수도 있다. **브라우저 로그인과 컨테이너 로그도 함께 확인**한다. 서비스 데이터는 호스트 볼륨에 남으므로 정상 재기동으로 사용자·저장소가 사라지는 구조는 아니다.
 
 재기동은 `systemctl restart gitea-stack`으로 한다. 접속이 끊기므로 유지보수 시간에 수행한다. `down -v`나 DB 디렉터리 삭제를 설정 수정의 대안으로 사용하지 않는다.
 
@@ -681,7 +701,7 @@ Gitea
 1. 최초 설치 때 만든 관리자 계정으로 로그인한다.
 2. 오른쪽 위 프로필 메뉴 → **Site Administration(사이트 관리) → Identity & Access → User Accounts(사용자 계정) → Create User Account(사용자 계정 생성)**으로 이동한다. Gitea 1.25.4의 사용자 생성 주소는 `/-/admin/users/new`다.
 3. 인증 소스는 **Local**, 사용자 이름·이메일·초기 비밀번호를 입력하고 계정을 생성한다.
-4. 사람이 쓰는 계정은 최초 로그인 시 비밀번호 변경을 요구하고, 각 사용자가 자기 계정으로 로그인해 변경을 마친다. CI 계정도 비밀번호 변경 요구가 남아 있지 않은 상태에서 7-2절의 토큰을 만든다.
+4. 사람이 쓰는 계정은 최초 로그인 시 비밀번호 변경을 요구하고, 각 사용자가 자기 계정으로 로그인해 변경을 마친다. CI 계정도 비밀번호 변경 요구가 남아 있지 않은 상태에서 7-5절의 토큰을 만든다.
 5. 일반 팀원·검토자·CI 계정에는 **사이트 관리자 권한을 부여하지 않는다.** 사용자 생성과 저장소 권한 부여는 별개다.
 
 | 계정 예시 | 사용할 사람·용도 | 뒤에서 연결할 Team |
@@ -984,36 +1004,185 @@ full 시험의 inventory는 `192.0.2.101~104`와 맞춘다. 처음 3대는 Contr
 
 ## 7. Gitea 사용자·보호 규칙·Secrets
 
-<p class="subsection-title"><strong>7-1. 브랜치·Tag 보호 규칙</strong></p>
+6-2절에서 만든 조직의 **Owners 계정**으로 진행한다. 일반 팀원에게 설정 메뉴가 보이지 않는 것은 정상이다. Team의 Code Write와 저장소 관리자 권한은 다르다. 먼저 각 설정의 위치를 구분한다.
+
+| 바꾸려는 것 | 들어갈 화면 | 사용하는 계정 |
+| --- | --- | --- |
+| Gitea 사용자 생성·관리자 지정 | 프로필 → Site Administration | 사이트 관리자 |
+| 조직·Team·Team 구성원 | 조직 페이지 → Teams | 조직 Owners |
+| 저장소 기능·병합 방식·브랜치·Tag 규칙 | 해당 저장소 → Settings | 조직 Owners 또는 저장소 관리자 |
+| 개인 액세스 토큰 발급 | 발급할 사용자로 로그인 → 사용자 Settings → Applications | 토큰 주인인 사용자 |
+| 파이프라인 비밀번호 저장·Runner 등록 | 해당 저장소 → Settings → Actions | 조직 Owners 또는 해당 설정 권한이 있는 관리자 |
+
+사이트 관리에서 master 규칙을 찾거나, 개인 사용자 설정에서 Repository 권한을 지정하는 방식이 아니다. 아래의 **Settings는 별도 표시가 없으면 `platform/private-cloud-v4` 저장소 화면 오른쪽의 Settings**다.
+
+<p class="subsection-title"><strong>7-1. 저장소 기능과 PR 병합 방식</strong></p>
 
 <div class="section-body" markdown="1">
 
-6-2절에서 조직·Team의 사용자·저장소 연결과 최초 master·develop push를 마친 뒤 아래 규칙을 적용한다. PR은 작성자가 아닌 별도 검토자가 승인한다. 사용자나 Team을 다시 만들 필요는 없다.
+최초 master·develop push까지 마친 저장소에서 **Settings → Repository**를 연다. 이 화면은 항목별로 저장 버튼이 나뉘어 있다. 수정한 영역의 **Update Settings**를 눌러야 반영된다. 파일을 서버에서 고치는 단계가 아니라 Gitea 웹 화면에서 저장소 정책을 지정하는 단계다.
 
-Repository의 **Settings → Branches**에서 설정한다.
+**기본 정보와 기능**
 
-| 규칙 | master | develop |
+- 저장소 상단의 소유자가 조직 `platform`인지 확인한다. 소유자 변경은 6-2절의 이전 절차로 수행하며, 저장소 이름만 바꿔서 조직 소유로 만드는 것은 아니다.
+- 저장소는 Private으로 유지한다. 공개 범위 변경은 Repository 화면 아래 Danger Zone에 있으므로 실수로 Public 전환 버튼을 누르지 않는다.
+- **Advanced Settings → Pull Requests**를 활성화한다. 이것을 끄면 PR 기반 검토·병합을 할 수 없다.
+- 같은 영역에서 **Actions**를 활성화한다. 서비스의 `GITEA__actions__ENABLED=true`와 이 저장소의 Actions 활성화가 둘 다 필요하다.
+- Releases는 릴리스 설명을 작성할 때 사용하므로 활성화한다. 최종 제품 TAR는 Gitea 첨부가 아니라 Nexus 링크로 안내한다.
+
+**PR의 최종 병합 방식**
+
+같은 **Advanced Settings의 Pull Requests 설정**에서 다음처럼 선택한다. 여기서 정한 방식은 master만이 아니라 해당 저장소의 PR 병합에 적용된다.
+
+| 화면 항목 | 선택할 값 | 목적 |
 | --- | --- | --- |
-| 직접 push | 금지 | 팀원 허용 |
-| force push | 금지 | 금지 |
-| 필수 승인 | 작성자 외 1명 | 필수로 두지 않음 |
-| 새 commit 뒤 이전 승인 | 해제 | PR을 쓰는 경우 같은 기준 |
-| 거절 리뷰가 있는 PR | merge 차단 | 필요에 따라 동일 적용 |
-| 관리자 승인 조건 우회 | 금지 | master 우회로 사용하지 않음 |
+| Create merge commit | 체크 | 두 부모를 가진 일반 병합 커밋 생성 |
+| Rebase, then fast-forward | 체크 해제 | rebase 병합을 사용하지 않음 |
+| Rebase, then create merge commit | 체크 해제 | rebase 뒤 병합하는 방식도 사용하지 않음 |
+| Create squash commit | 체크 해제 | PR 커밋을 하나로 압축하지 않음 |
+| Fast-forward only | 체크 해제 | 병합 커밋 없이 브랜치 포인터만 이동하지 않음 |
+| Manually merged | 체크 해제 | 수동으로 병합됨 표시하는 방식은 사용하지 않음 |
+| Default Merge Style | Create merge commit | PR 병합 버튼의 기본 방식 |
 
-merge 방법은 **merge commit만** 사용하고 squash·rebase merge를 끈다. 파이프라인이 merge commit의 두 번째 부모에서 승인 대상을 확인하기 때문이다. [Gitea 브랜치 보호](https://docs.gitea.com/1.25/usage/access-control/protected-branches/)
+파이프라인은 병합 커밋의 두 번째 부모를 이용해 승인받은 PR의 소스 커밋을 확인한다. **기본 병합 방식만 바꾸는 것이 아니라 다른 방식의 허용 체크도 해제한다.**
 
-**Settings → Tags**에서 `v*`를 보호하고 릴리스 담당자만 발행하게 한다. Labels에 `release:skip-test`를 만들고 시험 생략을 판단하는 검토자가 PR에 붙인다.
+**같은 화면 아래의 추가 PR 옵션**
+
+| 화면 항목 | 선택 | 이 구성에서의 이유 |
+| --- | --- | --- |
+| Allow edits from maintainers by default | 해제 | 외부 포크 작성자의 브랜치 수정 권한을 기본 허용하지 않음. Team의 기존 쓰기 권한은 유지 |
+| Enable updating pull request branch by rebase | 해제 | 공유 develop의 이력을 rebase로 바꾸지 않음. 최종 PR 병합 방식과는 별도 옵션 |
+| Delete pull request branch after merge by default | 해제 | develop → master PR에서 develop 삭제를 기본 선택하지 않음 |
+| Enable autodetect manual merge | 해제 | 로컬 병합을 자동 감지하지 않고 웹 PR 승인·병합으로 운영 |
+| Ignore whitespace conflicts | 해제 | 공백 차이도 검토. Ansible YAML 문법 검사는 별도로 수행 |
+
+**Update Settings**로 저장한 뒤 다시 페이지를 열어 값이 유지되는지 확인한다. feature 브랜치는 develop에 병합한 뒤 해당 브랜치만 확인해 삭제한다. master·develop은 유지한다. [Gitea 1.25.4 Repository 설정 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/options.tmpl)
 
 </div>
 
-<p class="subsection-title"><strong>7-2. Token과 Secret 구분</strong></p>
+<p class="subsection-title"><strong>7-2. master — 직접 push 금지, 승인 후 PR 병합</strong></p>
 
 <div class="section-body" markdown="1">
 
-CI 읽기 사용자로 **사용자 Settings → Applications → Generate New Token**에서 개인 액세스 토큰을 만든다. 대상 Repository·PR 조회에 필요한 `read:repository`, `read:issue` 범위를 사용한다. 저장소 자체의 접근 권한도 있어야 하며 scope만으로 권한이 늘어나지는 않는다.
+6-2절에서 master·develop을 처음 올린 뒤 이 규칙을 만든다. 처음부터 master push를 막으면 초기 코드 등록도 거절된다. 기존 사용자나 Team을 다시 만들 필요는 없다.
 
-Repository의 **Settings → Actions → Secrets**에 등록한다.
+1. 저장소의 **Settings → Branches**를 연다.
+2. 위쪽 **Default Branch**에서 master를 선택하고 **Update Default Branch**로 저장한다. 기본 브랜치는 clone·웹 화면의 기준이며, 이것만으로 브랜치가 보호되지는 않는다. feature PR을 만들 때는 별도로 대상 브랜치를 develop으로 선택한다.
+3. **Protected Branches → Add New Rule**을 누른다.
+4. **Protected Branch Name Pattern**에는 `master`를 입력한다. `v*`는 Tag 규칙에 사용할 값이지 여기의 master 규칙 이름이 아니다.
+5. 아래 표대로 선택하고 마지막 **Save Rule**을 누른다. 이미 master 규칙이 있으면 새 규칙을 중복 생성하지 말고 기존 규칙의 Edit를 연다.
+
+| 화면 항목 | master에 지정할 값 | 의미 |
+| --- | --- | --- |
+| Push | **Disable Push** | 직접 push·웹 코드 편집 등으로 master를 바로 변경하지 않음 |
+| Force Push | **Disable Force Push** | 강제 push로 이력을 바꾸지 않음 |
+| Required approvals | **1** | 작성자가 아닌 검토자의 승인 1개 필요 |
+| Restrict approvals to allowlisted users or teams | 체크 | 승인 수에 포함할 검토자를 제한 |
+| Allowlisted teams for reviews | **reviewers** | 6-2절에서 만든 검토 Team 선택 |
+| Dismiss stale approvals | 체크 | PR 내용이 바뀌는 새 commit이 올라오면 이전 승인 취소 |
+| Ignore stale approvals | 해제 또는 비활성 상태 유지 | 위의 승인 취소 기능을 사용하므로 별도 사용하지 않음 |
+| Merge | **Enable Merge Allowlist** | PR 병합 버튼을 누를 담당자 제한 |
+| Allowlisted teams for merging | **reviewers** | reviewers 구성원만 PR 병합 수행 |
+| Block merge on rejected reviews | 체크 | 공식 검토자의 변경 요청이 남아 있으면 병합 차단 |
+| Administrators must follow branch protection rules | 체크 | 관리자도 승인 조건을 건너뛰는 강제 병합을 하지 않음 |
+
+Team 선택 칸은 이름을 타이핑만 하지 말고 **검색 결과의 reviewers를 눌러 선택된 항목으로 들어갔는지** 확인한다. 조직에 팀이 있다는 것과 이 규칙의 허용 목록에 선택됐다는 것은 별개다. 사이트 관리자도 실제 검토·병합을 맡는다면 본인의 개인 계정을 reviewers에 연결하고 동일한 규칙을 따른다.
+
+아직 도입하지 않은 기능은 다음 값으로 둔다.
+
+| 나머지 항목 | 값 | 이유 |
+| --- | --- | --- |
+| Enable Status Check | 해제 | 현재 Workflow는 Tag 발행 후 실행된다. 아직 없는 PR 시험 결과를 병합 필수 조건으로 걸지 않음 |
+| Block merge on official review requests | 해제 | 별도 미응답 리뷰 요청 차단은 사용하지 않음. 필수 승인 1개와 거절 리뷰 차단은 유지 |
+| Block merge if pull request is outdated | 해제 | base 브랜치의 모든 변경을 미리 반영하도록 강제하지 않음. 충돌 해결·검토는 별도 |
+| Require signed commits | 해제 | GPG·SSH 커밋 서명 체계를 구성하기 전에는 필수화하지 않음 |
+| Protected file patterns | 빈 값 | 지정한 파일의 변경 자체를 차단하는 규칙은 사용하지 않음 |
+| Unprotected file patterns | 빈 값 | 직접 push를 허용하는 파일 예외를 만들지 않음 |
+
+상태 검사를 나중에 추가하려면 **PR에서 먼저 실행되는 검증 Workflow**를 만든 뒤, 그 작업의 실제 상태 이름을 필수 검사로 지정한다. Tag 패키징 작업을 master 병합의 선행 조건으로 걸면 실행 순서가 맞지 않는다.
+
+승인과 병합은 별도 동작이다. 검토자는 PR의 Files Changed를 읽고 Approve한 뒤, 조건이 충족되면 **Create merge commit**으로 병합한다. 승인 버튼을 누른 것만으로 master가 변경되는 것은 아니다. [브랜치 보호 동작](https://docs.gitea.com/1.25/usage/access-control/protected-branches/) · [1.25.4 규칙 입력 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/protected_branch.tmpl)
+
+</div>
+
+<p class="subsection-title"><strong>7-3. develop — 팀원 직접 push 허용</strong></p>
+
+<div class="section-body" markdown="1">
+
+같은 **Settings → Branches → Add New Rule**에서 develop용 규칙을 별도로 만든다. master 규칙의 이름만 develop으로 바꿔 덮어쓰지 않는다.
+
+| 화면 항목 | develop에 지정할 값 | 의미 |
+| --- | --- | --- |
+| Protected Branch Name Pattern | **develop** | develop만 대상으로 하는 별도 규칙 |
+| Push | **Allowlist Restricted Push** | 지정한 팀원에게 직접 push 허용 |
+| Allowlisted teams for pushing | **developers, reviewers** | 두 Team을 각각 검색해 선택 |
+| Allowlisted users for pushing | 빈 값 | 개인별 예외 대신 Team으로 관리 |
+| Deploy key push 허용 | 해제 | CI 읽기 계정이나 배포 키에 쓰기 권한을 추가하지 않음 |
+| Force Push | **Disable Force Push** | 공유 브랜치의 이력 재작성 차단 |
+| Required approvals | **0** | develop 직접 push에 PR 승인을 강제하지 않음 |
+| 승인 허용 목록 제한 | 해제 | develop에는 필수 승인자를 지정하지 않음 |
+| Merge | **Enable Merge** | Code Write 권한이 있는 팀원이 feature PR을 병합할 수 있음 |
+| Administrators must follow branch protection rules | 체크 | 관리자도 설정한 병합 보호를 우회하지 않음 |
+
+Status Check·서명 필수·오래된 PR 차단·미응답 리뷰 요청 차단·승인 취소/무시 옵션은 해제하고 파일 패턴은 비워 둔다. **Block merge on rejected reviews**는 체크해, PR을 사용하는 경우에는 남아 있는 변경 요청을 해결한 뒤 병합하도록 한다. **Save Rule**로 저장한다.
+
+설정 후 Protected Branches 목록에 `master`, `develop` 규칙 두 개가 각각 보이는지 확인한다. developers·reviewers는 대상 저장소에 Code Write도 있어야 한다. 브랜치 허용 목록에 팀만 추가했다고 Read 권한이 Write로 바뀌지는 않는다. ci-readers는 push 허용 목록에 넣지 않는다.
+
+일상 개발은 develop 직접 push 또는 feature → develop PR을 사용할 수 있다. 이 둘 중 하나만 강제하는 규칙은 두지 않는다. **develop → master는 PR과 승인 없이 직접 push할 수 없다.**
+
+</div>
+
+<p class="subsection-title"><strong>7-4. 릴리스 Tag와 시험 생략 라벨</strong></p>
+
+<div class="section-body" markdown="1">
+
+브랜치 보호와 Tag 보호는 서로 다른 설정이다. master 직접 push를 막았다고 아무나 릴리스 Tag를 발행하지 못하게 되는 것은 아니다.
+
+1. 저장소의 **Settings → Tags**를 연다.
+2. **Tag Pattern**에 `v*`를 입력한다.
+3. **Allowed teams**에서 **reviewers**를 검색해 선택한다. Allowed users는 개인 예외가 없다면 비운다. 두 칸을 모두 비우면 해당 패턴의 Tag 발행이 차단된다.
+4. **Protect Tag**로 저장한다. 목록에 `v*`와 허용 팀 reviewers가 표시되는지 확인한다.
+
+`v*`는 v4.1.3 같은 이름을 폭넓게 보호하는 패턴이고, 파이프라인은 추가로 `v숫자.숫자.숫자` 형식을 검사한다. 이 규칙은 Tag의 발행자를 제한할 뿐, Tag가 승인된 커밋을 가리키는지까지 확인하는 기능은 아니다. 그 검사는 Workflow의 정책 확인 단계가 수행한다. 이미 발행한 Tag는 이동·재사용하지 않고 새 패치 버전을 발행한다. [Gitea Tag 보호](https://docs.gitea.com/1.25/usage/access-control/protected-tags/)
+
+**시험 생략 라벨 생성**
+
+1. 저장소의 **Issues 또는 Pull Requests → Labels**를 연다.
+2. **New Label**에서 이름을 `release:skip-test`로 지정한다. 설명은 `VMware·OpenStack 배포 시험 생략`처럼 용도를 적고 저장한다. 색상은 동작에 영향이 없다.
+3. 이름이 `services.env`의 `TEST_SKIP_LABEL`과 같은지 확인한다. 다른 이름을 쓰려면 설정값도 함께 바꾼다.
+4. 검토자는 해당 PR의 오른쪽 **Labels**에서 라벨을 선택한 뒤 승인·병합한다. 일반 시험을 할 PR에는 이 라벨을 붙이지 않는다.
+
+Gitea 라벨 자체에 시험 생략 기능이 있는 것은 아니다. Runner가 이 이름을 읽어 full·skip을 결정한다. 현재 구성은 실행할 때 PR의 현재 라벨을 다시 읽는다. 이후 같은 Tag를 full로 재실행하려면 라벨을 제거하고 Actions에서 기존 Tag로 수동 실행한다.
+
+**관리자가 마지막에 대조할 결과**
+
+| 확인할 동작 | 기대 결과 |
+| --- | --- |
+| developers의 develop 직접 push | 허용 |
+| developers의 master 직접 push | 거절 |
+| master 대상 PR에 승인 없음 | 병합 불가 |
+| reviewers가 유효한 승인 후 일반 병합 | master 반영 가능 |
+| ci-reader의 코드 push·Tag 발행 | 불가 |
+| reviewers의 릴리스 Tag 발행 | 허용되며 Workflow 실행 조건이 됨 |
+
+관리자 계정으로만 확인하면 팀원 권한이 맞는지 알 수 없다. 실제 사용자로 확인하되, **임의의 릴리스 Tag를 시험 삼아 push하지 않는다.** Tag는 패키징을 시작하므로 13절의 릴리스 확인 단계에서 의도한 버전으로 발행한다.
+
+</div>
+
+<p class="subsection-title"><strong>7-5. CI 개인 토큰과 Actions Secrets</strong></p>
+
+<div class="section-body" markdown="1">
+
+Gitea의 로그인 비밀번호, Git/API용 개인 토큰, Runner 등록 Token은 용도가 다르다. `ci-reader`를 Runner라는 이름의 관리자 계정으로 만드는 것이 아니라, 읽기 전용 사용자로 만들고 그 사용자의 토큰을 Workflow에 전달한다.
+
+1. 별도 브라우저 프로필이나 시크릿 창에서 **ci-reader로 로그인**한다. 관리자 계정으로 토큰을 만들면 관리자 계정의 토큰이 되므로 로그인 사용자를 확인한다.
+2. 프로필 → **Settings → Applications → Manage Access Tokens → Generate New Token**을 연다.
+3. 토큰 이름을 `release-source-read`처럼 용도에 맞게 지정하고, `read:repository`, `read:issue` 범위를 선택해 생성한다. private 저장소를 읽어야 하므로 공개 저장소만 허용하는 제한은 사용하지 않는다.
+4. 생성된 값을 안전하게 복사한다. 화면을 닫으면 원문을 다시 볼 수 없으므로 분실했다면 새 토큰을 발급하고 Secret을 교체한다. 토큰 값을 Git 코드·본문·터미널 로그에 남기지 않는다.
+5. 조직 Owners 계정으로 돌아와 저장소의 **Settings → Actions → Secrets**를 연다.
+6. **Add Secret**에서 아래 이름을 Name에, 실제 비밀값을 Value에 넣어 각각 저장한다. Secret 이름을 설정하는 칸과 비밀번호 본문을 넣는 칸을 혼동하지 않는다.
+
+토큰 생성 화면의 권한 표에서는 **repository 행을 Read, issue 행을 Read, 나머지를 No Access**로 선택하면 된다. private 저장소를 포함하는 접근 범위를 선택해도 ci-reader에게 없는 저장소 권한이 새로 생기는 것은 아니다. Team의 읽기 권한과 토큰의 읽기 scope를 둘 다 만족해야 한다. [Gitea 1.25.4 개인 토큰 입력 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/user/settings/applications.tmpl)
 
 | Secret 이름 | 값과 용도 |
 | --- | --- |
@@ -1024,6 +1193,8 @@ Repository의 **Settings → Actions → Secrets**에 등록한다.
 | OPENSTACK_PASSWORD | 시험 OpenStack admin 비밀번호 |
 
 Runner 등록 Token은 다음 절의 등록에만 사용한다. REPO_READ_TOKEN에 넣지 않는다. `.runner`도 Git 인증용 파일이 아니다. Secrets를 호스트 `.secret`이나 Git 코드에 다시 저장하지 않는다.
+
+저장 후 목록에 Secret **이름**이 보이는지 확인한다. 비밀값이 다시 표시되지 않는 것은 정상이다. 오입력했다면 해당 Secret을 편집해 값을 교체한다. Actions 또는 Secrets 메뉴가 없으면 7-1절의 저장소 Actions 활성화와 현재 로그인 계정의 관리 권한부터 확인한다. Workflow는 `${{ secrets.REPO_READ_TOKEN }}` 같은 이름으로 이 값을 받는다. 이름만 등록하고 실제 토큰·비밀번호 값은 비워 두는 방식이 아니다. [Gitea Actions Secrets](https://docs.gitea.com/1.25/usage/actions/secrets/)
 
 skip은 VMware·OpenStack을 쓰지 않지만 Git과 Nexus 인증은 필요하다. Nexus 사용자 이름은 `services.env`의 `NEXUS_USER`와 실제 생성한 계정을 맞춘다.
 
@@ -1136,7 +1307,11 @@ gitea-runner --version
 
 host 실행, 동시 작업 1개를 사용한다. Raw SHA256 캐시와 containerd 캐시는 Actions의 cache.enabled와 별개다. [Runner 4.0.0](https://blog.gitea.com/release-of-runner-4.0.0/)
 
-Repository의 **Settings → Actions → Runners**에서 등록 Token을 발급받아 아래 대화형 등록에 입력한다.
+**Gitea에서 이 저장소 전용 Runner 등록 Token 준비**
+
+1. 조직 Owners 계정으로 **대상 저장소 → Settings → Actions → Runners**를 연다. 사이트 관리의 전역 Runner 화면과 구분한다. 여기서 받은 Token으로 등록하면 이 저장소용 Runner가 된다.
+2. 오른쪽 위 **Create new Runner**를 눌러 펼쳐지는 **Registration Token**을 복사한다. 화면에서 Token을 보는 것만으로 Runner가 서버에 설치·기동되지는 않는다.
+3. 아래 명령은 웹 화면이 아니라 **물리서버의 터미널**에서 실행한다. 토큰을 소스 코드나 명령줄 인자로 적지 않고 대화형 질문에 입력한다. 기존 `.runner`가 있다면 새로 등록하지 말고 현재 등록·서비스 상태를 먼저 확인한다.
 
 ```bash title="최초 한 번만 Runner 등록"
 cd /var/lib/gitea-runner
@@ -1144,9 +1319,21 @@ sudo -u gitea-runner /usr/local/bin/gitea-runner \
   --config /etc/gitea-runner/config.yaml register
 ```
 
-URL은 새 Gitea, label은 **`contrabass-engine-release:host`**다. Workflow의 runs-on은 `contrabass-engine-release`이며 `:host`를 붙이지 않는다. label이 맞지 않으면 YAML뿐 아니라 실제 등록 label과 서비스가 읽는 config 경로도 확인한다.
+등록 명령에서 묻는 값은 다음과 같다. Gitea 웹 로그인 비밀번호나 CI 개인 토큰을 Runner Token에 넣지 않는다.
+
+| 대화형 등록 항목 | 입력할 값 |
+| --- | --- |
+| Gitea instance URL | `https://SERVER_HOST:GITEA_HTTPS_PORT/`. 저장소 경로를 붙이지 않음 |
+| Runner token | 방금 Runners 화면에서 복사한 Registration Token |
+| Runner name | `release-host-01`처럼 화면에서 식별할 이름 |
+| Runner labels | **contrabass-engine-release:host** |
+
+등록 결과는 `/var/lib/gitea-runner/.runner`에 저장된다. 파일이 생겼는지만 확인하고 내용을 출력·공유하지 않는다. **등록은 Gitea에 작업자를 연결하는 것이고, 기동은 systemd로 그 작업자를 계속 실행하는 것**이다. 아직 daemon을 켜지 않았으므로 이 단계에서 Online이 아니어도 된다. 기동은 12절에서 한다.
+
+label의 `:host`는 작업을 호스트에서 실행한다는 뜻이다. Workflow의 `runs-on`은 **contrabass-engine-release**이며 `:host`를 붙이지 않는다. 이름이 다르면 Runner가 Online이어도 작업을 가져가지 못한다. [Gitea의 Runner 등록·범위](https://docs.gitea.com/1.25/usage/actions/act-runner/) · [1.25.4 Token 표시 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/shared/actions/runner_list.tmpl)
 
 ```bash title="등록 파일과 VM 접속용 RSA 키"
+test -s /var/lib/gitea-runner/.runner
 chown gitea-runner:gitea-runner /var/lib/gitea-runner/.runner
 chmod 0600 /var/lib/gitea-runner/.runner
 install -d -m 0700 -o gitea-runner -g gitea-runner /var/lib/gitea-runner/.ssh
@@ -3543,6 +3730,10 @@ provider 최초 설치는 외부 Registry 통신이 필요하다. 폐쇄된 Runn
 
 ## 12. 최종 Workflow 반영과 Runner 기동
 
+`.gitea/workflows/publish-manifest.yaml`은 **제품 Git 저장소 안의 파일**이다. `/etc/gitea-runner/config.yaml`은 Runner 실행 설정이고, `/opt/gitea/bundle-builder`는 호스트의 설치된 빌더다. 같은 파일을 다른 위치에 세 번 복사하는 구조가 아니다.
+
+6-2절에서 최초 코드와 함께 Workflow를 이미 push했다. Gitea 웹에서 **Code → .gitea → workflows → publish-manifest.yaml**을 열어 아래 내용이 있는지 확인한다. 등록 이후 Workflow를 고쳤다면 로컬 수정만 하지 말고 develop에 push한 뒤 정해 둔 PR 절차로 master에 반영한다. master 직접 push 금지를 잠시 푸는 방식으로 진행하지 않는다.
+
 <details class="analysis-toggle" markdown="1">
 <summary>.gitea/workflows/publish-manifest.yaml — 전체 내용</summary>
 
@@ -3911,7 +4102,9 @@ systemctl is-active gitea-runner
 journalctl -u gitea-runner -n 30 --no-pager
 ```
 
-Gitea Runners 화면에서 Online과 label을 확인한다. full 시험의 OSD·SeaweedFS 작업은 디스크 내용을 바꿀 수 있으므로 **시험 VM과 비어 있는 데이터 디스크만 대상**으로 삼는다.
+저장소의 **Settings → Actions → Runners**를 새로고침해 방금 등록한 이름·Online 상태·label을 확인한다. **저장소 상단 Actions**는 실행 이력을 보는 화면이고, **Settings 안의 Actions**는 Runner·Secrets를 관리하는 화면이다.
+
+일반 develop push만으로 릴리스 작업이 생기지 않는 것은 정상이다. 이 Workflow의 시작 조건은 `v*` Tag push 또는 수동 실행이다. Runner가 Online이 된 뒤 13절에서 실제 릴리스 Tag를 발행한다. Queue에서 대기한다면 Online 상태·등록 범위·`runs-on`과 label의 일치·여유 공간을 확인한다. full 시험의 OSD·SeaweedFS 작업은 디스크 내용을 바꿀 수 있으므로 **시험 VM과 비어 있는 데이터 디스크만 대상**으로 삼는다.
 
 ---
 
@@ -3921,7 +4114,14 @@ Gitea Runners 화면에서 Online과 label을 확인한다. full 시험의 OSD·
 
 <div class="section-body" markdown="1">
 
-초기 master에 바로 Tag를 붙이지 않는다. develop에서 manifest release를 다음 번호로 수정하고 commit·push한다. develop → master PR을 만들고 다른 검토자가 `release:skip-test`를 붙여 승인한 뒤 담당자가 merge commit으로 합친다.
+초기 master에 바로 Tag를 붙이지 않는다. 먼저 다음 순서로 검토된 릴리스 커밋을 만든다.
+
+1. developer 계정으로 develop의 manifest release를 다음 번호로 수정하고 commit·push한다. 코드만 변경하더라도 새 릴리스라면 manifest의 release를 새 번호로 맞춘다.
+2. 저장소 상단 **Pull Requests → New Pull Request**에서 **base는 master, compare는 develop**으로 선택한다. 반대로 선택하지 않는다. 제목에 릴리스 버전을 적고 변경 파일을 확인해 PR을 생성한다.
+3. 별도 reviewer 계정으로 해당 PR을 열어 **Files Changed**를 검토한다. 이번 최초 시험은 PR의 **Labels**에 `release:skip-test`를 선택한다.
+4. 검토 화면의 **Review → Approve**로 승인한다. 승인 후에도 PR이 열린 상태일 수 있다. **Conversation**으로 돌아와 조건을 확인하고 **Create merge commit**으로 병합한다.
+5. PR에 Merged가 표시되고 master에 새 병합 커밋이 생긴 것을 확인한다. 이 단계는 코드 반영이고, 아직 Tag를 발행한 것은 아니다. develop 브랜치는 삭제하지 않는다.
+6. Tag push는 reviewers 팀의 릴리스 담당자가 수행한다. 아래 명령에서 **방금 PR을 병합한 정확한 commit**을 지정한다. 다른 PR이 이어서 병합됐다면 master의 현재 HEAD가 이번 릴리스 커밋과 다를 수 있다.
 
 아래는 manifest를 4.1.3으로 수정한 예다. Gitea PR 화면에서 발행할 정확한 merge commit을 확인해 입력한다.
 
@@ -3936,7 +4136,17 @@ git -c http.sslVerify=false push origin v4.1.3
 
 Actions에서 policy가 skip이고 VM 시험 없이 최종 게시·channel 갱신이 성공하는지 확인한다. raw-manifest의 executions 기록은 skipped이며 passed가 아니다.
 
-Gitea Repository의 **Releases → New Release**에서는 이미 발행한 `v4.1.3`을 선택해 설명을 작성한다. 제목은 `Contrabass 4.1.3`, 내용은 변경점·설치 주의·알려진 문제·시험 결과·고정 버전 다운로드 링크를 적는다. 새 Tag를 다시 만들거나 기존 Tag를 이동하지 않는다. 이 구성에서 Gitea Release 설명은 담당자가 작성하며, Workflow가 자동 생성하는 것은 Nexus의 실행 기록이다.
+**Gitea Release에 변경 설명 남기기**
+
+파이프라인의 최종 게시가 성공한 뒤 reviewers 계정으로 다음을 수행한다.
+
+1. 저장소의 **Releases → New Release**를 연다.
+2. **Tag name**에서 이미 push한 `v4.1.3`을 선택한다. 기존 Tag라는 안내를 확인한다. 오타로 새 Tag를 만들거나 Tag 대상을 다른 commit으로 바꾸지 않는다.
+3. 제목은 `Contrabass 4.1.3`, 본문에는 변경점·설치 주의·알려진 문제·시험 통과 또는 생략 여부를 적는다. 이번 skip 발행을 시험 통과라고 쓰지 않는다.
+4. 다운로드는 **Nexus의 해당 버전 TAR 고정 URL과 .sha256 URL을 본문 링크로 넣는다.** 릴리스 노트에 시간이 지나면 대상이 바뀌는 current URL만 넣지 않는다. 대용량 TAR를 Gitea 첨부파일로 다시 업로드하지 않는다.
+5. 정식 버전이면 pre-release는 선택하지 않고 **Publish Release**를 누른다. 초안으로 남기려면 Save Draft를 사용한다.
+
+Release 화면의 소스 ZIP·TAR.GZ는 해당 Git Tag의 코드 압축본이지, Nexus의 최종 배포 TAR가 아니다. 이 구성에서 Release 설명은 담당자가 작성하며 Workflow가 자동으로 게시하는 것은 Nexus 산출물·실행 기록이다. [Gitea 1.25.4 Release 작성 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/release/new.tmpl)
 
 </div>
 
@@ -3944,7 +4154,7 @@ Gitea Repository의 **Releases → New Release**에서는 이미 발행한 `v4.1
 
 <div class="section-body" markdown="1">
 
-같은 PR에서 생략 라벨을 제거하고 Actions 수동 실행에 기존 Tag v4.1.3을 넣는다. **Tag와 공개 TAR를 다시 만들지 않는다.** 기존 TAR를 받아 같은 SHA256으로 시험한다.
+같은 PR에서 생략 라벨을 제거한다. 저장소 상단 **Actions → Publish Contrabass Engine Release → Run workflow**에서 `release_tag`에 기존 `v4.1.3`을 입력해 수동 실행한다. **Tag와 공개 TAR를 다시 만들지 않는다.** 기존 TAR를 받아 같은 SHA256으로 시험한다. 버튼이 없으면 reviewers의 Actions Write 권한, 기본 브랜치의 Workflow와 `workflow_dispatch` 설정을 확인한다.
 
 - VMware VM 4대 생성과 모든 VM의 SSH 준비 완료.
 - 첫 VM이 이번 staging TAR를 받아 전체 해시 대조.
