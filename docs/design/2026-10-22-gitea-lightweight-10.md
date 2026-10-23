@@ -1311,20 +1311,32 @@ host 실행, 동시 작업 1개를 사용한다. Raw SHA256 캐시와 containerd
 
 1. 조직 Owners 계정으로 **대상 저장소 → Settings → Actions → Runners**를 연다. 사이트 관리의 전역 Runner 화면과 구분한다. 여기서 받은 Token으로 등록하면 이 저장소용 Runner가 된다.
 2. 오른쪽 위 **Create new Runner**를 눌러 펼쳐지는 **Registration Token**을 복사한다. 화면에서 Token을 보는 것만으로 Runner가 서버에 설치·기동되지는 않는다.
-3. 아래 명령은 웹 화면이 아니라 **물리서버의 터미널**에서 실행한다. 토큰을 소스 코드나 명령줄 인자로 적지 않고 대화형 질문에 입력한다. 기존 `.runner`가 있다면 새로 등록하지 말고 현재 등록·서비스 상태를 먼저 확인한다.
+3. 아래 명령은 웹 화면이 아니라 **물리서버의 root 터미널**에서 실행한다. 토큰은 화면에 표시되지 않는 입력으로 받고 환경변수로 전달한다. 기존 `.runner`가 있다면 새로 등록하지 말고 현재 등록·서비스 상태를 먼저 확인한다.
 
 ```bash title="최초 한 번만 Runner 등록"
 cd /var/lib/gitea-runner
-sudo -u gitea-runner /usr/local/bin/gitea-runner \
+
+read -r -s -p 'Runner 등록 토큰: ' GITEA_RUNNER_REGISTRATION_TOKEN
+printf '\n'
+export GITEA_RUNNER_REGISTRATION_TOKEN
+
+sudo --preserve-env=GITEA_RUNNER_REGISTRATION_TOKEN \
+  -u gitea-runner \
+  /usr/local/bin/gitea-runner \
   --config /etc/gitea-runner/config.yaml register
+
+unset GITEA_RUNNER_REGISTRATION_TOKEN
 ```
 
-등록 명령에서 묻는 값은 다음과 같다. Gitea 웹 로그인 비밀번호나 CI 개인 토큰을 Runner Token에 넣지 않는다.
+`sudo`는 다른 사용자로 실행할 때 환경변수를 기본적으로 정리한다. `--preserve-env`는 방금 입력한 등록 토큰만 `gitea-runner` 사용자에게 전달하고, 마지막 `unset`은 현재 셸에서 토큰을 지운다. Gitea 웹 로그인 비밀번호나 CI 개인 토큰을 넣지 않는다.
+
+토큰 없이 `register`만 실행하면 `missing token, token-file argument, or GITEA_RUNNER_REGISTRATION_TOKEN environment variable` 오류가 발생한다. 등록 토큰은 Runner의 대화형 질문을 기다리지 말고 위 명령으로 먼저 전달한다. [Runner 등록 토큰 전달 방법](https://docs.gitea.com/runner/develop/registration/)
+
+이후 등록 과정에서 입력하거나 확인할 값은 다음과 같다. `config.yaml`에 labels가 이미 지정돼 있으면 labels 질문은 생략될 수 있다.
 
 | 대화형 등록 항목 | 입력할 값 |
 | --- | --- |
 | Gitea instance URL | `https://SERVER_HOST:GITEA_HTTPS_PORT/`. 저장소 경로를 붙이지 않음 |
-| Runner token | 방금 Runners 화면에서 복사한 Registration Token |
 | Runner name | `release-host-01`처럼 화면에서 식별할 이름 |
 | Runner labels | **contrabass-engine-release:host** |
 
