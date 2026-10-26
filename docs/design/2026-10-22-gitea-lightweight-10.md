@@ -943,25 +943,16 @@ git -c http.sslVerify=false push -u origin develop
 <details class="analysis-toggle" markdown="1">
 <summary>.gitignore — 전체 내용</summary>
 
-<div class="highlight" data-source-path="repository/gitignore"><pre><code><span class="na">.terraform/</span>
-<span class="na">*.tfstate</span>
-<span class="na">*.tfstate.*</span>
-<span class="na">*.tfplan</span>
-<span class="na">*.plan</span>
-<span class="na">.env</span>
-<span class="na">.env.*</span>
-<span class="na">!.env.example</span>
-<span class="na">*.secret</span>
-<span class="na">id_rsa</span>
-<span class="na">id_ed25519</span>
-<span class="na">vm-info.json</span>
-<span class="na">*-cleanup.enabled</span>
-<span class="na">staging-upload.enabled</span>
-<span class="na">bundle-published.enabled</span>
-<span class="na">test-passed.sha256</span>
-<span class="na">*.tar</span>
+<div class="highlight" data-source-path="repository/gitignore"><pre><code><span class="na">*.tar</span>
 <span class="na">*.tar.gz</span>
 <span class="na">*.qcow2</span>
+<span class="na">*.tgz</span>
+<span class="na">*.img</span>
+
+<span class="na">*.swp</span>
+<span class="na">*.swo</span>
+<span class="na">__pycache__/</span>
+<span class="na">*.pyc</span>
 </code></pre></div>
 
 </details>
