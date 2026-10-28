@@ -31,7 +31,7 @@ Git 사용자 ── Gitea + PostgreSQL
                     │ Tag 작업 수신
                     ▼
               Gitea Runner (systemd, host, 동시 작업 1개)
-                    ├── 빌더 + Raw 캐시 + containerd 이미지 캐시
+                    ├── 빌더(Skopeo) + Raw SHA256 캐시 + 이미지 digest 캐시
                     ├── Nexus: 재료·staging·최종 TAR
                     └── OpenTofu → vCenter → VMware 시험 VM 4대
 
@@ -44,6 +44,7 @@ Git 사용자 ── Gitea + PostgreSQL
 | Nexus | 3.96.1, 내장 H2, 파일 Blob Store 하나 |
 | Runner | 4.0.0, host 실행, label `contrabass-engine-release` |
 | 런타임 | nerdctl Full 2.2.2로 신규 설치 |
+| 패키징 이미지 수집 | Skopeo, Docker·containerd 데몬에 의존하지 않음 |
 | VMware 시험 | 기존 Rocky 9.6 템플릿, 단일 ESXi, VM 4대 |
 | provider | VMware 2.17.1 / OpenStack 1.53.0 |
 | 최종 TAR 보관 | 릴리스 계열별 최신 3개 |
@@ -71,7 +72,7 @@ Git 사용자 ── Gitea + PostgreSQL
 ```bash title="기본 도구와 구축 설정 다운로드"
 apt-get update
 apt-get install -y ca-certificates curl git jq openssl util-linux iptables \
-  sudo socat haproxy unzip rsync restic gnupg iproute2
+  sudo socat haproxy unzip rsync restic gnupg iproute2 skopeo
 install -d -m 0700 /root/release-platform-setup
 cd /root/release-platform-setup
 base=https://wjdxotjd112.github.io/tech-notes/assets/gitea-lightweight-10
@@ -145,6 +146,7 @@ install -m 0640 -o root -g gitea-runner \
 
 <span class="nv">BUNDLE_WORK_DIR</span><span class="o">=</span>/data/private-release
 <span class="nv">RAW_CACHE_DIR</span><span class="o">=</span>/data/private-release-cache/raw/sha256
+<span class="nv">IMAGE_CACHE_DIR</span><span class="o">=</span>/data/private-release-cache/images/sha256
 <span class="nv">BUNDLE_BUILDER_DIR</span><span class="o">=</span>/opt/gitea/bundle-builder
 <span class="nv">RELEASE_KEEP_COUNT</span><span class="o">=</span><span class="m">3</span>
 
@@ -202,6 +204,7 @@ install -m 0640 -o root -g gitea-runner \
 | NEXUS_USER | 뒤에서 생성할 CI 전용 Nexus 사용자 |
 | MANIFEST_REPOSITORY / BUNDLE_REPOSITORY / RAW_REPOSITORY / DOCKER_REPOSITORY / STAGING_REPOSITORY | Nexus에 만들 Repository 이름 |
 | 데이터·캐시·작업 경로 | 용량을 확보한 실제 마운트 경로 |
+| RAW_CACHE_DIR / IMAGE_CACHE_DIR | Raw SHA256 캐시 / 이미지 digest별 Skopeo 캐시. Docker 이미지 저장소와는 별도 |
 | OPENSTACK_AUTH_URL | 시험 OpenStack의 Keystone VIP |
 | GITEA_IMAGE / POSTGRES_IMAGE / NEXUS_IMAGE | Gitea·DB·Nexus 서비스 실행 버전. 같은 버전으로 구축하면 기본값 유지 |
 | RELEASE_KEEP_COUNT | 계열별 최종 TAR 보관 개수. 기본값 3 |
@@ -225,6 +228,8 @@ printf '%s\n' "Gitea: ${GITEA_REPO_URL}" "Nexus: ${NEXUS_URL}" "Download: ${PUBL
 
 ## 3. 런타임·디렉터리·인증서 준비
 
+이 절의 nerdctl 설치와 뒤의 서비스 Compose는 **새 서버에 서비스를 구성하는 기준**이다. 이미 Docker로 Gitea·Nexus를 운영한다면 기존 런타임과 서비스는 그대로 둔다. 패키징 빌더는 Skopeo로 이미지를 수집하므로 호스트에 nerdctl을 추가하거나 Docker를 교체할 필요가 없다. 기존 환경의 빌더만 바꾸는 절차는 9절의 «기존 Docker 호스트에 빌더 변경 적용»에 정리했다.
+
 기존 containerd가 없는 새 서버에서만 Full 패키지를 설치한다. 실행 중인 런타임에 덮어쓰지 않는다. Full에는 containerd·runc·CNI 등이 들어 있다. [nerdctl 배포 파일](https://github.com/containerd/nerdctl/releases/tag/v2.2.2)
 
 ```bash title="호스트 런타임 설치"
@@ -239,7 +244,7 @@ systemctl enable --now containerd
 nerdctl info
 ```
 
-호스트는 이미 만들어진 이미지를 pull·save하므로 BuildKit 서비스를 별도로 켤 필요가 없다. 고객사 제품 install.sh가 준비하는 실행 환경과는 구분한다.
+패키징은 이미 만들어진 이미지를 수집하는 작업이므로 BuildKit 서비스를 별도로 켤 필요가 없다. Skopeo는 Nexus에서 이미지를 직접 읽는다. 고객사 제품 install.sh가 준비하는 containerd·nerdctl 실행 환경과는 구분한다.
 
 아래는 빈 데이터 경로의 초기 설정이다. 기존 데이터에 재귀 chown을 적용하는 명령이 아니다.
 
@@ -251,6 +256,7 @@ install -d -m 0755 -o 1000 -g 1000 "${GITEA_DATA_DIR}"
 install -d -m 0755 -o 200 -g 200 "${NEXUS_DATA_DIR}" "${NEXUS_DATA_DIR}/etc"
 install -d -m 0700 -o 200 -g 200 "${NEXUS_DATA_DIR}/etc/ssl"
 install -d -m 0755 /opt/gitea "${BUNDLE_BUILDER_DIR}" "${RAW_CACHE_DIR}"
+install -d -m 0700 "${IMAGE_CACHE_DIR}"
 install -d -m 2775 -o root -g gitea-runner "${BUNDLE_WORK_DIR}"
 install -d -m 0750 -o gitea-runner -g gitea-runner \
   /var/lib/gitea-runner/workspace /var/lib/gitea-runner/logs
@@ -1296,7 +1302,7 @@ install -m 0644 "${CONFIG_SRC}/host/etc/systemd/system/gitea-runner.service" /et
 gitea-runner --version
 ```
 
-host 실행, 동시 작업 1개를 사용한다. Raw SHA256 캐시와 containerd 캐시는 Actions의 cache.enabled와 별개다. [Runner 4.0.0](https://blog.gitea.com/release-of-runner-4.0.0/)
+host 실행, 동시 작업 1개를 사용한다. Raw SHA256 캐시와 Skopeo 이미지 캐시는 Actions의 cache.enabled와 별개다. [Runner 4.0.0](https://blog.gitea.com/release-of-runner-4.0.0/)
 
 **Gitea에서 이 저장소 전용 Runner 등록 Token 준비**
 
@@ -1351,6 +1357,28 @@ sudo -u gitea-runner ssh-keygen -t rsa -b 4096 -N '' \
 ---
 
 ## 9. 빌더·root wrapper·고객사 템플릿 배치
+
+**호스트의 패키징 도구와 고객사의 런타임을 분리한다.** 빌더는 Skopeo로 이미지를 수집하고, 고객사 deploy.sh는 기존대로 containerd·nerdctl을 사용한다.
+
+```text title="이미지를 모아 고객사에 전달하는 경로"
+Nexus의 이미지 + manifest의 digest
+    → Skopeo: 원본 manifest·레이어 보존
+    → IMAGE_CACHE_DIR/<digest의 SHA256 값>/
+    → images/release-images.tar + images/image-map.txt
+    → contrabass-engine-deploy.tar
+    → 고객사 nerdctl load·push
+```
+
+Docker load·push를 거치면 원본 OCI manifest가 Docker 형식으로 변환되어 digest가 달라질 수 있다. 여기서는 `skopeo copy --all --preserve-digests`로 원본을 `dir:` 캐시에 저장하고, 원본 manifest·레이어로 이미지 TAR를 구성한다. 형식을 바꿔 digest를 맞추는 대신 **manifest에 기록한 digest를 그대로 유지**한다. `--all`은 이미지 index가 참조하는 이미지도 함께 복사하며, `--preserve-digests`는 보존할 수 없으면 실패시킨다. [Skopeo copy 옵션](https://github.com/podman-container-tools/skopeo/blob/main/docs/skopeo-copy.1.md), [이미지 저장·전송 형식](https://github.com/containers/image/blob/main/docs/containers-transports.5.md)
+
+| 구분 | 사용 위치와 동작 |
+| --- | --- |
+| 패키징 호스트 | Skopeo로 Nexus에서 수집. 빌더 내부에서는 docker·nerdctl 명령을 호출하지 않음 |
+| Raw 캐시 | RAW_CACHE_DIR에 SHA256별로 저장하고 검증 후 재사용 |
+| 이미지 캐시 | IMAGE_CACHE_DIR에 digest별로 저장. 같은 digest는 레이어를 다시 다운로드하지 않음 |
+| 고객사 | 기존 nerdctl로 release-images.tar를 불러와 Private Nexus에 등록 |
+
+이미지 캐시는 `docker images`나 containerd 캐시와 별개다. 새 캐시의 첫 빌드에서는 다운로드하고, 이후 같은 digest를 재사용한다. 캐시가 있어도 Nexus의 Tag digest와 파일 무결성 검사는 유지한다.
 
 <details class="analysis-toggle" markdown="1">
 <summary>/opt/gitea/bundle-builder/common.sh — 전체 내용</summary>
@@ -1638,11 +1666,12 @@ source_git<span class="o">()</span><span class="w"> </span><span class="o">{</sp
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TEMPLATE_DIR</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span>
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_WORK_DIR</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span>
 :<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RAW_CACHE_DIR</span><span class="p">:?</span><span class="si">}</span><span class="s2">"</span>
+:<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE_CACHE_DIR</span><span class="p">:?Set IMAGE_CACHE_DIR in services.env</span><span class="si">}</span><span class="s2">"</span>
 <span class="nv">NEXUS_URL</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_URL</span><span class="p">%/</span><span class="si">}</span><span class="s2">"</span>
 <span class="nv">NEXUS_REGISTRY</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_URL</span><span class="p">#http://</span><span class="si">}</span><span class="s2">"</span>
 <span class="nv">NEXUS_REGISTRY</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_REGISTRY</span><span class="p">#https://</span><span class="si">}</span><span class="s2">"</span>
 
-require_commands<span class="w"> </span>curl<span class="w"> </span>git<span class="w"> </span>nerdctl<span class="w"> </span>sha256sum<span class="w"> </span>tar<span class="w"> </span>awk<span class="w"> </span>jq<span class="w"> </span>install<span class="w"> </span>mktemp<span class="w"> </span>ln<span class="w"> </span>cp<span class="w"> </span>chown<span class="w"> </span>runuser<span class="w"> </span>realpath
+require_commands<span class="w"> </span>curl<span class="w"> </span>git<span class="w"> </span>skopeo<span class="w"> </span>sha256sum<span class="w"> </span>tar<span class="w"> </span>awk<span class="w"> </span>jq<span class="w"> </span>install<span class="w"> </span>mktemp<span class="w"> </span>ln<span class="w"> </span>cp<span class="w"> </span>chown<span class="w"> </span>runuser<span class="w"> </span>realpath<span class="w"> </span>stat
 
 <span class="k">for</span><span class="w"> </span>required_file<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_BASE_IMAGE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
@@ -1662,15 +1691,18 @@ require_commands<span class="w"> </span>curl<span class="w"> </span>git<span cla
 <span class="k">fi</span>
 
 install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RAW_CACHE_DIR</span><span class="si">}</span><span class="s2">"</span>
+install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0700</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE_CACHE_DIR</span><span class="si">}</span><span class="s2">"</span>
 install<span class="w"> </span>-d<span class="w"> </span>-o<span class="w"> </span>root<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUNNER_GROUP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-m<span class="w"> </span><span class="m">2775</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_WORK_DIR</span><span class="si">}</span><span class="s2">"</span>
 <span class="nv">latest_info</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="s2">"</span>
 <span class="nv">latest_manifest</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="k">)</span><span class="s2">"</span>
 <span class="nv">work_root</span><span class="o">=</span><span class="s2">""</span>
 <span class="nv">download_tmp</span><span class="o">=</span><span class="s2">""</span>
+<span class="nv">image_download</span><span class="o">=</span><span class="s2">""</span>
 
 cleanup<span class="o">()</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span>rm<span class="w"> </span>-f<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">latest_info</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">latest_manifest</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">download_tmp</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">download_tmp</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_download</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_download</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-d<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
 <span class="w">    </span>rm<span class="w"> </span>-rf<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="k">fi</span>
@@ -1872,18 +1904,36 @@ awk<span class="w"> </span>-F<span class="s1">'"'</span><span class="w"> </span>
 <span class="w">    </span>cp<span class="w"> </span>--reflink<span class="o">=</span>auto<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cache_file</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">destination</span><span class="si">}</span><span class="s2">"</span>
 <span class="k">done</span>
 
-<span class="nb">echo</span><span class="w"> </span><span class="s2">"[3/5] Verify and pull Docker images"</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">DOCKER_CONFIG</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/registry-auth"</span>
-install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0700</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">DOCKER_CONFIG</span><span class="si">}</span><span class="s2">"</span>
-<span class="nb">printf</span><span class="w"> </span><span class="s1">'%s'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_PASSWORD</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>nerdctl<span class="w"> </span>login<span class="w"> </span>--username<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_USER</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--password-stdin<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_REGISTRY</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;/dev/null
+<span class="nb">echo</span><span class="w"> </span><span class="s2">"[3/5] Verify and cache container images without a container daemon"</span>
+<span class="nv">registry_auth</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/registry-auth.json"</span>
+<span class="nv">image_tls_verify</span><span class="o">=</span><span class="nb">true</span>
+<span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TLS_SKIP_VERIFY</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">image_tls_verify</span><span class="o">=</span><span class="nb">false</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'%s'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_PASSWORD</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>skopeo<span class="w"> </span>login<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--authfile<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">registry_auth</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--tls-verify<span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">image_tls_verify</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--username<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_USER</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--password-stdin<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_REGISTRY</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;/dev/null
 <span class="nv">image_map</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/images/image-map.txt"</span>
+<span class="nv">image_layout</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-layout"</span>
+install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_layout</span><span class="si">}</span><span class="s2">/blobs/sha256"</span>
+
+stage_image_blob<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">source</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span><span class="w"> </span><span class="nv">hex</span><span class="o">=</span><span class="s2">"</span><span class="nv">$2</span><span class="s2">"</span><span class="w"> </span><span class="nv">destination</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">image_layout</span><span class="si">}</span><span class="s2">/blobs/sha256/</span><span class="nv">$2</span><span class="s2">"</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">hex</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-e<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">destination</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>file_sha256<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">hex</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"Image cache checksum mismatch: </span><span class="si">${</span><span class="nv">source</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="o">}</span>
+<span class="w">  </span>ln<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">destination</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span>cp<span class="w"> </span>--reflink<span class="o">=</span>auto<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">destination</span><span class="si">}</span><span class="s2">"</span>
+<span class="o">}</span>
+
 awk<span class="w"> </span>-F<span class="s1">'"'</span><span class="w"> </span><span class="s1">'</span>
 <span class="s1">  /^images:/ {in_images=1; next}</span>
 <span class="s1">  in_images &amp;&amp; /^  - name:/ {name=$2}</span>
 <span class="s1">  in_images &amp;&amp; /^    tag:/ {tag=$2}</span>
 <span class="s1">  in_images &amp;&amp; /^    digest:/ {print name "|" tag "|" $2; name=""; tag=""}</span>
-<span class="s1">'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/manifest.yaml"</span><span class="w"> </span><span class="p">|</span>
+<span class="s1">'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/manifest.yaml"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-list.txt"</span>
 <span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="s1">'|'</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>image_name<span class="w"> </span>image_tag<span class="w"> </span>expected_digest<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_digest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^sha256:<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="o">]]</span>
 <span class="w">  </span><span class="nv">source_ref</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_REGISTRY</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">DOCKER_REPOSITORY</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">image_name</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">image_tag</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nv">registry_path</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">DOCKER_REPOSITORY</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">image_name</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nv">actual_digest</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>nexus_curl<span class="w"> </span>-fsSI<span class="w"> </span><span class="se">\</span>
@@ -1894,22 +1944,62 @@ awk<span class="w"> </span>-F<span class="s1">'"'</span><span class="w"> </span>
 <span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"Digest mismatch: </span><span class="si">${</span><span class="nv">image_name</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">image_tag</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
 <span class="w">    </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="w">  </span><span class="o">}</span>
-<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"  </span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nv">pinned_ref</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">source_ref</span><span class="p">%:*</span><span class="si">}</span><span class="s2">@</span><span class="si">${</span><span class="nv">expected_digest</span><span class="si">}</span><span class="s2">"</span>
-<span class="w">  </span>nerdctl<span class="w"> </span>pull<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">pinned_ref</span><span class="si">}</span><span class="s2">"</span>
-<span class="w">  </span>nerdctl<span class="w"> </span>tag<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">pinned_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="nv">image_cache</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE_CACHE_DIR</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">expected_digest</span><span class="p">#sha256:</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-e<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">image_download</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE_CACHE_DIR</span><span class="si">}</span><span class="s2">/.download.XXXXXX"</span><span class="k">)</span><span class="s2">"</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"  [download] </span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span>skopeo<span class="w"> </span>copy<span class="w"> </span>--all<span class="w"> </span>--preserve-digests<span class="w"> </span>--authfile<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">registry_auth</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--src-tls-verify<span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">image_tls_verify</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">"docker://</span><span class="si">${</span><span class="nv">pinned_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"dir:</span><span class="si">${</span><span class="nv">image_download</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>file_sha256<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_download</span><span class="si">}</span><span class="s2">/manifest.json"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_digest</span><span class="p">#sha256:</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
+<span class="w">    </span>mv<span class="w"> </span>-T<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_download</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span><span class="nv">image_download</span><span class="o">=</span><span class="s2">""</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"  [cache] </span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">/manifest.json"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>!<span class="w"> </span>-L<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
+<span class="w">  </span>stage_image_blob<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">/manifest.json"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_digest</span><span class="p">#sha256:</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>image_blob<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">"</span>/*<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nv">blob_name</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">image_blob</span><span class="p">##*/</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">blob_name</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>stage_image_blob<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_blob</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">blob_name</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span><span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">blob_name</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span><span class="se">\.</span>manifest<span class="se">\.</span>json$<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span>stage_image_blob<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_blob</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">blob_name</span><span class="p">%.manifest.json</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>image_manifest<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">/manifest.json"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">"</span>/*.manifest.json<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_manifest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'[.config.digest?, .layers[]?.digest, .manifests[]?.digest] | .[] | select(type == "string")'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_manifest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-dependencies.txt"</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>dependency<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">dependency</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^sha256:<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="o">&amp;&amp;</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_layout</span><span class="si">}</span><span class="s2">/blobs/sha256/</span><span class="si">${</span><span class="nv">dependency</span><span class="p">#sha256:</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
+<span class="w">        </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"Image cache is incomplete: </span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2"> (</span><span class="si">${</span><span class="nv">dependency</span><span class="si">}</span><span class="s2">)"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">        </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="w">      </span><span class="o">}</span>
+<span class="w">    </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-dependencies.txt"</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="nv">media_type</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.mediaType // "application/vnd.docker.distribution.manifest.v2+json"'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">/manifest.json"</span><span class="k">)</span><span class="s2">"</span>
+<span class="w">  </span>jq<span class="w"> </span>-cn<span class="w"> </span>--arg<span class="w"> </span>name<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--arg<span class="w"> </span>tag<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_tag</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--arg<span class="w"> </span>digest<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_digest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--arg<span class="w"> </span>mediaType<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">media_type</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--argjson<span class="w"> </span>size<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>stat<span class="w"> </span>-c<span class="w"> </span><span class="s1">'%s'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_cache</span><span class="si">}</span><span class="s2">/manifest.json"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s1">'{mediaType:$mediaType,digest:$digest,size:$size,annotations:{"io.containerd.image.name":$name,"org.opencontainers.image.ref.name":$tag&#125;&#125;'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-descriptors.jsonl"</span>
 <span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s|%s|%s|%s\n'</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_name</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_tag</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected_digest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_map</span><span class="si">}</span><span class="s2">"</span>
-<span class="k">done</span>
+<span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-list.txt"</span>
 
-<span class="nb">echo</span><span class="w"> </span><span class="s2">"[4/5] Save Docker images"</span>
-mapfile<span class="w"> </span>-t<span class="w"> </span>image_refs<span class="w"> </span>&lt;<span class="w"> </span>&lt;<span class="o">(</span>awk<span class="w"> </span>-F<span class="s1">'|'</span><span class="w"> </span><span class="s1">'{print $1}'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_map</span><span class="si">}</span><span class="s2">"</span><span class="o">)</span>
-<span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${#</span><span class="nv">image_refs</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-gt<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">"[4/5] Save digest-preserving image archive for nerdctl"</span>
+<span class="o">[[</span><span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_map</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-descriptors.jsonl"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"No Docker images were found in the manifest."</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
 <span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="o">}</span>
-nerdctl<span class="w"> </span>save<span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/images/release-images.tar"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_refs</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span>
+jq<span class="w"> </span>-s<span class="w"> </span><span class="s1">'{schemaVersion:2,mediaType:"application/vnd.oci.image.index.v1+json",manifests:.}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">work_root</span><span class="si">}</span><span class="s2">/image-descriptors.jsonl"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_layout</span><span class="si">}</span><span class="s2">/index.json"</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s1">'{"imageLayoutVersion":"1.0.0"}'</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_layout</span><span class="si">}</span><span class="s2">/oci-layout"</span>
+tar<span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">image_layout</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-cf<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/images/release-images.tar"</span><span class="w"> </span>oci-layout<span class="w"> </span>index.json<span class="w"> </span>blobs
 
 <span class="nb">echo</span><span class="w"> </span><span class="s2">"[5/5] Create archive and outer TAR checksum"</span>
 <span class="nv">download_tmp</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_WORK_DIR</span><span class="si">}</span><span class="s2">/.bundle-output.XXXXXX"</span><span class="k">)</span><span class="s2">"</span>
@@ -2824,6 +2914,38 @@ visudo -cf /etc/sudoers.d/contrabass-engine-runner
 빌더는 Runner workspace의 소스를 재사용한다. 두 번째 clone이나 호스트 `.secret`은 필요 없다. 호스트의 컨테이너 관리 socket 전체도 Runner에 개방하지 않는다.
 
 고객사 TAR에는 shallow Git이 들어가지만 인증 헤더·Git hook은 제거한다. 이미지와 Raw는 지정한 내용인지 확인해 모은다. 고객사는 TAR 전체를 검증한 뒤 deploy.sh를 실행하며, 소스 파일 전체의 SHA256SUMS를 다시 관리하지 않는다.
+
+<details class="analysis-toggle" markdown="1">
+<summary>기존 Docker 호스트에 빌더 변경 적용</summary>
+
+현재 실행 중인 빌드가 끝난 뒤 적용한다. 2절의 최신 구성 묶음을 받아 압축을 풀고 `CONFIG_SRC`를 지정한다. **테스트 서버의 services.env 전체를 복사하지 않는다.** 기존 주소·포트·계정·경로를 유지하고 이미지 캐시 항목만 추가한다.
+
+```bash title="기존 services.env에 추가할 한 줄"
+IMAGE_CACHE_DIR=/data/private-release-cache/images/sha256
+```
+
+이미 Skopeo가 설치돼 있으면 설치 명령은 생략한다. 없는 Ubuntu 호스트에서는 다음처럼 설치한다.
+
+```bash title="Skopeo 준비"
+apt-get install -y --no-install-recommends skopeo
+skopeo --version
+```
+
+```bash title="빌더 한 파일 교체와 문법 확인"
+source /etc/gitea-runner-env/bundle-pipeline.env
+install -d -m 0700 "${IMAGE_CACHE_DIR}"
+install -m 0755 -o root -g root \
+  "${CONFIG_SRC}/host/opt/gitea/bundle-builder/build-bundle.sh" \
+  "${BUNDLE_BUILDER_DIR}/build-bundle.sh"
+bash -n /etc/gitea-runner-env/services.env
+bash -n "${BUNDLE_BUILDER_DIR}/build-bundle.sh"
+```
+
+이 빌더·설정 교체에는 Docker·Gitea·Nexus·Runner 재시작이 필요 없다. 다음 Workflow 실행부터 새 빌더를 읽는다. Docker의 daemon.json, 기존 서비스 Compose, Workflow, 고객사 deploy.sh·install.sh는 이 변경을 위해 수정하지 않는다. 뒤의 백업 예제 등 서비스 관리 명령은 신규 nerdctl 호스트 기준이므로, Docker 호스트에 그대로 적용하는 절차와는 구분한다.
+
+</details>
+
+**확인한 범위:** nerdctl을 사용할 수 없는 실행 PATH에서 실제 재료로 TAR 생성과 전체 체크섬 검사를 통과했다. 첫 빌드에서는 이미지 10개를 수집했고, 두 번째 빌드에서는 10개 모두 캐시를 사용했다. 생성한 이미지 TAR를 nerdctl 2.2.2로 불러와 별도 Registry에 push했을 때도 10개 digest가 원본과 일치했다. 이 확인은 패키징과 고객사 이미지 반입 호환성 시험이며, Gitea Workflow 전체·VMware·OpenStack 재배포 시험과는 별개다.
 
 ---
 
