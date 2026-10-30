@@ -29,7 +29,10 @@ export_test_inputs() {
   [[ "${path}" == "candidates/${id}/${sha}/contrabass-engine-deploy.tar" ]]
   test -r "${TOFU_SSH_PRIVATE_KEY}"
   test -s "${TOFU_SSH_PUBLIC_KEY}"
-  export TF_VAR_bundle_url="${NEXUS_URL%/}/repository/${STAGING_REPOSITORY}/${path}"
+  [[ "${NEXUS_DOWNLOAD_URL}" == https://* ]] || {
+    echo 'NEXUS_DOWNLOAD_URL must be an HTTPS base URL.' >&2; return 1;
+  }
+  export TF_VAR_bundle_url="${NEXUS_DOWNLOAD_URL%/}/repository/${STAGING_REPOSITORY}/${path}"
   export TF_VAR_bundle_sha256="${sha}"
   export TF_VAR_ssh_private_key_path="${TOFU_SSH_PRIVATE_KEY}"
   export TF_VAR_ssh_public_key="$(<"${TOFU_SSH_PUBLIC_KEY}")"
@@ -96,29 +99,13 @@ select_test_mode() (
     jq -e --arg sha "${commit}" --arg branch "${RELEASE_BRANCH}" \
       '.merged == true and .merge_commit_sha == $sha and .base.ref == $branch' \
       "${scratch}/pr.json" >/dev/null || {
-      echo 'Tag must point to the approved master PR merge commit.' >&2; exit 1;
+      echo 'Tag must point to the release PR merge commit.' >&2; exit 1;
     }
     pr="$(jq -r '.number' "${scratch}/pr.json")"
     gitea_get "pulls/${pr}" "${scratch}/pr.json" || exit 1
     gitea_get "git/commits/${commit}" "${scratch}/merge.json" || exit 1
     [[ "$(jq '.parents | length' "${scratch}/merge.json")" == 2 ]] || {
       echo 'Release PRs must use a normal merge commit (not squash/rebase).' >&2; exit 1;
-    }
-    reviewed_sha="$(jq -r '.parents[1].sha' "${scratch}/merge.json")"
-    printf '[]\n' > "${scratch}/reviews.json"
-    page=1
-    while true; do
-      gitea_get "pulls/${pr}/reviews?limit=50&page=${page}" "${scratch}/page.json" || exit 1
-      jq -s '.[0] + .[1]' "${scratch}/reviews.json" "${scratch}/page.json" > "${scratch}/combined.json"
-      mv "${scratch}/combined.json" "${scratch}/reviews.json"
-      [[ "$(jq 'length' "${scratch}/page.json")" -ge 50 ]] || break
-      page=$((page + 1))
-    done
-    jq -e --arg sha "${reviewed_sha}" \
-      '[.[] | select(.official == true and .dismissed != true and .stale != true
-        and .state == "APPROVED" and .commit_id == $sha)] | length >= 1' \
-      "${scratch}/reviews.json" >/dev/null || {
-      echo 'PR has no valid approval for its reviewed head commit.' >&2; exit 1;
     }
     if jq -e --arg label "${TEST_SKIP_LABEL}" \
       'any(.labels[]?; .name == $label)' "${scratch}/pr.json" >/dev/null; then mode=skip; fi
@@ -132,7 +119,7 @@ select_test_mode() (
     master_line="${master_release%.*}"
     [[ "${line}" != "${master_line}" \
       && "$(printf '%s\n' "${line}" "${master_line}" | sort -V | head -1)" == "${line}" ]] || {
-      echo 'A new current/future-line tag requires an approved master PR.' >&2; exit 1;
+      echo 'A new current/future-line tag requires a merged release-branch PR.' >&2; exit 1;
     }
     [[ "$(git -C "${source_dir}" cat-file -t "refs/tags/${tag}")" == tag ]] || {
       echo 'Use an annotated tag: git tag -a VERSION -m MESSAGE.' >&2; exit 1;

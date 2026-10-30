@@ -24,6 +24,8 @@ tags:
 
 ## 1. 완성할 환경과 먼저 준비할 것
 
+**설정 묶음 갱신: 2026-10-30.** 필수 PR 승인은 0개, 시험 생략 라벨은 `skip-test`로 맞췄다. master의 PR 병합 제한은 유지한다. Runner와 시험 VM이 서로 다른 Nexus 주소를 쓰는 환경도 아래 설정으로 구분한다.
+
 기준은 **새 Ubuntu 24.04 LTS x86_64 물리서버 한 대**다. 기존 운영 서버에 아래 디렉터리나 설정을 덮어쓰는 절차가 아니다. 서비스·데이터를 그대로 옮기는 작업이라면 DB와 Blob을 함께 복구하는 방식을 사용한다.
 
 ```text title="한 물리서버에 구성할 서비스"
@@ -48,6 +50,8 @@ Git 사용자 ── Gitea + PostgreSQL
 | VMware 시험 | 기존 Rocky 9.6 템플릿, 단일 ESXi, VM 4대 |
 | provider | VMware 2.17.1 / OpenStack 1.53.0 |
 | 최종 TAR 보관 | 릴리스 계열별 최신 3개 |
+| Git 정책 | develop 직접 push, master PR 병합만 허용, 필수 승인 0개 |
+| 시험 선택 | PR의 `skip-test` 라벨 또는 과거 계열 annotated Tag의 `[skip-test]` |
 
 버전은 기존 파이프라인을 재현하는 기준이다. 최신 보안 패치 버전이라는 의미는 아니다. 이미지·바이너리를 업그레이드할 때는 설치 시험과 manifest 변경을 함께 수행한다.
 
@@ -61,6 +65,19 @@ Git 사용자 ── Gitea + PostgreSQL
 
 사내 프로그램·Ansible 전체 소스·QCOW2·이미지 본문은 공개 설정 묶음에 들어 있지 않다. 이미 검증한 배포 TAR를 초기 재료로 쓰므로, 새 Nexus가 비어 있어도 파일을 하나씩 다시 찾을 필요는 없다.
 
+방화벽은 서비스를 띄우는 서버뿐 아니라 **요청을 보내는 주체별로** 신청한다.
+
+| 출발지 → 목적지 | 목적지 포트·주소 | 확인할 요청 |
+| --- | --- | --- |
+| Runner → Gitea·Nexus | GITEA_URL·NEXUS_URL의 HTTPS 포트 | clone·PR 조회·재료 수집·업로드 |
+| Runner → vCenter | TCP 443 | VM 템플릿 조회·복제·삭제 |
+| Runner → 시험 VM 4대의 첫 NIC | TCP 22 | OpenTofu remote-exec SSH |
+| 첫 시험 VM → 사내 Nexus 공개 경로 | NEXUS_DOWNLOAD_URL의 포트 | staging TAR 다운로드 |
+| Runner → 시험 OpenStack | Keystone와 service catalog의 각 API 포트 | 이미지·네트워크·VM·볼륨 시험 |
+| 시험 노드 → OS 패키지 저장소 | 제품 main.yml의 package_ip에 해당하는 경로 | Ansible 배포 패키지 설치 |
+
+vSphere 콘솔이나 다른 단말에서 SSH가 된다고 Runner에서의 접속도 보장되는 것은 아니다. NAT·라우팅·서버 방화벽과 실제 출발지 주소를 함께 확인한다.
+
 ---
 
 ## 2. 전체 설정 받기와 주소·경로 확정
@@ -72,7 +89,7 @@ Git 사용자 ── Gitea + PostgreSQL
 ```bash title="기본 도구와 구축 설정 다운로드"
 apt-get update
 apt-get install -y ca-certificates curl git jq openssl util-linux iptables \
-  sudo socat haproxy unzip rsync restic gnupg iproute2 skopeo
+  sudo socat haproxy unzip rsync restic gnupg iproute2 skopeo python3
 install -d -m 0700 /root/release-platform-setup
 cd /root/release-platform-setup
 base=https://wjdxotjd112.github.io/tech-notes/assets/gitea-lightweight-10
@@ -115,6 +132,7 @@ install -m 0640 -o root -g gitea-runner \
 <span class="nv">GITEA_HTTPS_PORT</span><span class="o">=</span><span class="m">30000</span>
 <span class="nv">GITEA_SSH_PORT</span><span class="o">=</span><span class="m">222</span>
 <span class="nv">NEXUS_HTTPS_PORT</span><span class="o">=</span><span class="m">55555</span>
+<span class="nv">NEXUS_DOWNLOAD_URL</span><span class="o">=</span><span class="s2">""</span>
 <span class="nv">RELEASE_HTTPS_PORT</span><span class="o">=</span><span class="m">8443</span>
 <span class="nv">RELEASE_MAP_FILE</span><span class="o">=</span>/etc/haproxy/bundle-channels.map
 <span class="nv">RELEASE_SOCKET</span><span class="o">=</span>/run/haproxy/admin.sock
@@ -140,7 +158,7 @@ install -m 0640 -o root -g gitea-runner \
 
 <span class="nv">GITEA_REPOSITORY</span><span class="o">=</span>platform/private-cloud-v4
 <span class="nv">RELEASE_BRANCH</span><span class="o">=</span>master
-<span class="nv">TEST_SKIP_LABEL</span><span class="o">=</span>release:skip-test
+<span class="nv">TEST_SKIP_LABEL</span><span class="o">=</span>skip-test
 <span class="nv">LEGACY_RELEASE_TAGS</span><span class="o">=</span><span class="s2">""</span>
 <span class="nv">NEXUS_USER</span><span class="o">=</span>release-ci
 
@@ -179,6 +197,7 @@ install -m 0640 -o root -g gitea-runner \
 
 <div class="highlight" data-source-path="host/etc/gitea-runner-env/bundle-pipeline.env"><pre><code><span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/services.env
 <span class="nv">NEXUS_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">NEXUS_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
+<span class="nv">NEXUS_DOWNLOAD_URL</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DOWNLOAD_URL</span><span class="k">:-</span><span class="si">${</span><span class="nv">NEXUS_URL</span><span class="si">}}</span><span class="s2">"</span>
 <span class="nv">GITEA_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">GITEA_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
 <span class="nv">GITEA_REPO_URL</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">GITEA_URL</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">GITEA_REPOSITORY</span><span class="si">}</span><span class="s2">.git"</span>
 <span class="nv">PUBLIC_RELEASE_URL</span><span class="o">=</span><span class="s2">"https://</span><span class="si">${</span><span class="nv">SERVER_HOST</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">RELEASE_HTTPS_PORT</span><span class="si">}</span><span class="s2">"</span>
@@ -198,6 +217,7 @@ install -m 0640 -o root -g gitea-runner \
 | services.env에서 확인할 값 | 의미 |
 | --- | --- |
 | SERVER_HOST | Gitea·Nexus·다운로드 공통 IP 또는 DNS |
+| NEXUS_DOWNLOAD_URL | 시험 VM이 TAR를 받을 Nexus HTTPS 기준 주소. 비우면 Runner의 NEXUS_URL 사용 |
 | GITEA_HTTPS_PORT / GITEA_SSH_PORT / NEXUS_HTTPS_PORT / RELEASE_HTTPS_PORT | 외부에서 접속할 포트 |
 | GITEA_REPOSITORY | 실제 소유자/저장소. 예시 `platform/private-cloud-v4` |
 | RELEASE_BRANCH / TEST_SKIP_LABEL | 릴리스 브랜치와 시험 생략 PR 라벨 |
@@ -211,7 +231,17 @@ install -m 0640 -o root -g gitea-runner \
 
 `services.env`는 Compose·systemd·Bash가 함께 읽는 `KEY=value` 파일이다. 이미지 변수에는 실제 이미지 파일이 아니라 **서비스를 실행할 이미지 이름·태그·digest**가 들어 있다. 제품 배포용 이미지 목록은 `release/manifest.yaml`에서 관리한다.
 
-`bundle-pipeline.env`는 Bash에서만 읽는다. 예를 들어 `SERVER_HOST`와 `NEXUS_HTTPS_PORT`를 합쳐 `NEXUS_URL`을 만든다. 주소를 두 파일에 따로 입력하지 않는다. `LEGACY_RELEASE_TAGS`는 신규 환경에서 비워 두며 승인 확인을 피하는 용도로 사용하지 않는다. 마지막 백업 항목은 14절에서 원격 백업을 활성화할 때 설정한다. 비밀번호·토큰은 이 파일에 넣지 않는다.
+`bundle-pipeline.env`는 Bash에서만 읽는다. 예를 들어 `SERVER_HOST`와 `NEXUS_HTTPS_PORT`를 합쳐 `NEXUS_URL`을 만든다. 주소를 두 파일에 따로 입력하지 않는다. `LEGACY_RELEASE_TAGS`는 PR 연결이 없는 기존 Tag를 재실행하기 위한 호환 예외다. 새 저장소에서는 빈 값으로 두며, 과거 계열의 새 패치는 별도의 patch Tag 경로를 사용한다. 마지막 백업 항목은 14절에서 원격 백업을 활성화할 때 설정한다. 비밀번호·토큰은 이 파일에 넣지 않는다.
+
+**물리서버는 사설 주소, VMware VM은 다른 주소로 접근하는 경우**에는 `SERVER_HOST`를 사설 주소로 유지하고 `NEXUS_DOWNLOAD_URL`만 VM에서 접근 가능한 주소로 지정한다. 예를 들어 `https://198.51.100.10:55555`처럼 프로토콜·외부 포트까지 포함한다.
+
+| 요청 주체 | 사용하는 값 | 용도 |
+| --- | --- | --- |
+| Runner·root 빌더 | NEXUS_URL | 재료 수집, staging 업로드·정리, 최종 게시 |
+| 첫 번째 시험 VM | NEXUS_DOWNLOAD_URL | staging TAR 다운로드 |
+| 시험 VM 안의 Private Nexus | 첫 VM의 API IP와 NEXUS_PORT | 반입 재료 제공. 사내 Nexus 주소와 별개 |
+
+다운로드 주소만 다르게 하고 `candidates/<manifest_id>/<sha256>/...` 경로·인증·TAR 해시는 그대로 유지한다. OpenTofu에는 공통 함수가 완성된 `TF_VAR_bundle_url`을 전달하므로 `deployment.tf`에 공인 IP를 하드코딩하지 않는다. 이 값은 HAProxy channel 주소인 `PUBLIC_RELEASE_URL`을 바꾸는 설정도 아니다.
 
 `/etc/gitea-runner-env/services.env`를 편집기로 열어 실제 환경에 맞게 저장한 뒤, 아래 명령으로 문법과 계산된 접속 주소를 확인한다. `source`는 설정을 읽는 명령이지 편집하는 명령이 아니다.
 
@@ -219,7 +249,8 @@ install -m 0640 -o root -g gitea-runner \
 bash -n /etc/gitea-runner-env/services.env
 bash -n /etc/gitea-runner-env/bundle-pipeline.env
 source /etc/gitea-runner-env/bundle-pipeline.env
-printf '%s\n' "Gitea: ${GITEA_REPO_URL}" "Nexus: ${NEXUS_URL}" "Download: ${PUBLIC_RELEASE_URL}"
+printf '%s\n' "Gitea: ${GITEA_REPO_URL}" "Runner Nexus: ${NEXUS_URL}" \
+  "VM Nexus: ${NEXUS_DOWNLOAD_URL}" "Channel: ${PUBLIC_RELEASE_URL}"
 ```
 
 포트는 외부 포워딩과 컨테이너 내부 포트를 구분한다. 이 예시에서 Gitea 내부는 30000, Nexus 내부는 55555다. 외부 포트만 바꾸면 Compose 매핑과 접속 URL이 이를 반영한다. 내부 포트까지 바꾸려면 대응 설정도 수정해야 한다.
@@ -265,6 +296,35 @@ ln -s /etc/gitea-runner-env/services.env /root/compose/.env
 
 `/root/compose/.env`는 공통 설정의 링크다. Compose가 환경변수를 저장하는 것이 아니라 실행할 때 읽는다. 이후 Compose 명령은 `/root/compose`에서 실행한다.
 
+<details class="analysis-toggle" markdown="1">
+<summary>기존 Docker 서버를 유지하는 경우 — Compose와 systemd에서 달라지는 것</summary>
+
+기존 Gitea·DB는 현재 Compose와 데이터 경로로 유지한다. 이 글의 containerd 설치, 새 Gitea stack 기동, 기존 인증서 덮어쓰기는 진행하지 않는다. 새 Nexus를 Docker로 올린다면 우선 설치된 Compose 명령을 확인한다.
+
+```bash
+docker compose version
+command -v docker-compose
+docker-compose version
+```
+
+첫 명령이 실패해도 `/usr/bin/docker-compose`가 있으면 독립 실행형 명령을 사용한다. `docker compose`와 `docker-compose`는 실행 경로가 다르며, 옵션을 `docker` 명령 바로 뒤에 붙이는 것으로 대체하지 않는다.
+
+| Nexus unit 항목 | Docker Compose plugin 사용 | 독립 실행형 사용 |
+| --- | --- | --- |
+| Requires | docker.service | docker.service |
+| After | docker.service network-online.target | docker.service network-online.target |
+| WorkingDirectory | /root/compose | /root/compose |
+| ExecStart | /usr/bin/docker compose -p nexus -f nexus-compose.yaml up -d | /usr/bin/docker-compose -p nexus -f nexus-compose.yaml up -d |
+| ExecStop | /usr/bin/docker stop -t 180 nexus | /usr/bin/docker stop -t 180 nexus |
+
+경로를 `/data/...`로 옮겼다면 WorkingDirectory와 실제 Compose·`.env` 위치도 함께 맞춘다. Runner unit의 Wants·After에서도 신규 containerd·gitea-stack 대신 실제 운영 중인 Docker·Nexus unit을 사용한다. 기존 Gitea가 다른 방식으로 관리되면 없는 unit 이름을 추가하지 않는다.
+
+이 경로에서는 서비스 조회·Nexus 인증서 생성용 컨테이너 실행도 Docker 명령을 사용한다. 고객사 `deploy.sh`·`install.sh`의 containerd·nerdctl 실행은 그대로 둔다. 초기 이미지 재료 게시와 빌더는 Skopeo이므로 런타임 전환이 필요 없다.
+
+**Docker daemon.json 수정이나 Docker 재시작은 이 구성의 필수 절차가 아니다.** 운영 Docker를 재시작하면 기존 Gitea·DB 등에도 영향이 생길 수 있으므로 별도 유지보수 작업으로 다룬다.
+
+</details>
+
 사내 CA 인증서가 있다면 그 인증서와 개인키를 사용한다. 아래는 독립된 사내 시험망의 자체 서명 예시다. SAN에는 접속할 IP·DNS를 넣는다.
 
 ```bash title="Gitea와 HAProxy 인증서"
@@ -285,11 +345,15 @@ chmod 0600 "${GITEA_CERT_DIR}/gitea.pem"
 
 자체 서명용 `TLS_SKIP_VERIFY=true`, Runner의 `insecure: true`, `OS_INSECURE=true`는 대상이 서로 다르다. TLS_SKIP_VERIFY와 OS_INSECURE는 services.env에서 지정한다. 사내 CA를 신뢰하도록 준비한 뒤에는 클라이언트별 인증서 검증을 켠다. 검증 생략을 외부 공개 서비스의 기본 보안 설정으로 사용하지 않는다.
 
+기존 Gitea 인증서를 HAProxy에서 재사용하면 인증서와 개인키를 합친 PEM이 필요하다. Nexus HTTPS는 JKS keystore를 사용하므로 Gitea의 PEM을 같은 이름으로 복사해서는 안 된다. 같은 인증서를 쓸 때도 PKCS12·JKS 변환과 Nexus의 keystore 암호 설정을 맞춘다. 사설 주소와 VM이 사용하는 외부 주소가 다르면 SAN에도 실제 접속 IP·DNS가 모두 포함돼야 한다.
+
 ---
 
 ## 4. Gitea와 PostgreSQL 기동
 
-Compose가 환경변수에서 DB·HTTPS·등록 제한 등을 Gitea 설정으로 반영한다. 생성된 app.ini는 `${GITEA_DATA_DIR}/gitea/conf/app.ini`에 남는다. **기존 서버의 암호화 키가 들어 있는 app.ini를 복사할 필요는 없다.** [Gitea Docker 환경설정](https://docs.gitea.com/1.25/installation/install-with-docker/)
+이미 Gitea가 운영 중이라면 **이 절의 새 DB·관리자 초기화를 건너뛴다.** 기존 Compose·볼륨·app.ini·인증서·DB 비밀번호를 유지하고, 통합 설정의 주소·포트와 실제 저장소만 맞춘다. 기존 데이터에 새 설치용 랜덤 비밀번호나 초기 볼륨을 덮어쓰지 않는다.
+
+새 서버에서는 Compose가 환경변수에서 DB·HTTPS·등록 제한 등을 Gitea 설정으로 반영한다. 생성된 app.ini는 `${GITEA_DATA_DIR}/gitea/conf/app.ini`에 남는다. 기존 서비스를 복원하는 작업이 아닌 **새 인스턴스 초기화에 한해** 기존 서버의 내부 키가 담긴 app.ini를 가져오지 않는다. [Gitea Docker 환경설정](https://docs.gitea.com/1.25/installation/install-with-docker/)
 
 <details class="analysis-toggle" markdown="1">
 <summary>/root/compose/gitea-compose.yaml — 전체 내용</summary>
@@ -636,47 +700,136 @@ test -f "${SEED_DIR}/git/init-container/contrabass-engine/install.sh"
 
 <div class="section-body" markdown="1">
 
-관리 담당 Nexus 계정으로 실행한다. Runner 역할에는 원본 재료 게시 권한이 없다. 비밀번호 입력은 화면에 표시하지 않는다.
+관리 담당 Nexus 계정으로 실행한다. Runner 역할에는 원본 재료 게시 권한이 없다. 아래 두 명령은 각각 독립된 서브셸이므로 오류가 나도 로그인한 셸 전체를 종료하지 않는다.
+
+먼저 현재 셸의 경로를 확인한다. 새 터미널에서는 이 값이 자동으로 유지되지 않는다.
+
+```bash
+export CONFIG_SRC=/root/release-platform-setup/release-platform-config
+export SEED_DIR=/root/release-seed/contrabass-engine-deploy
+test -s "${SEED_DIR}/manifest.yaml"
+test -s "${SEED_DIR}/images/image-map.txt"
+```
 
 ```bash title="Raw 최초 등록 — 비어 있는 새 Repository에서 실행"
-source /etc/gitea-runner-env/bundle-pipeline.env
-source "${CONFIG_SRC}/host/opt/gitea/bundle-builder/common.sh"
-read -r -p 'Nexus 관리 사용자: ' NEXUS_USER
-read -r -s -p 'Nexus 비밀번호: ' NEXUS_PASSWORD
-printf '\n'
-while IFS='|' read -r path expected; do
-  test "$(sha256sum "${SEED_DIR}/raw/${path}" | awk '{print $1}')" = "${expected}" || exit 1
-  nexus_curl -fsS --upload-file "${SEED_DIR}/raw/${path}" \
-    "${NEXUS_URL}/repository/${RAW_REPOSITORY}/${path}"
-  actual="$(nexus_curl -fsS "${NEXUS_URL}/repository/${RAW_REPOSITORY}/${path}" | sha256sum | awk '{print $1}')"
-  test "${actual}" = "${expected}" || exit 1
-done < <(awk -F'"' '/^  - path:/{path=$2} /^    sha256:/{print path "|" $2}' "${SEED_DIR}/manifest.yaml")
+(
+  set -euo pipefail
+  : "${CONFIG_SRC:?Set CONFIG_SRC}" "${SEED_DIR:?Set SEED_DIR}"
+  test -s "${SEED_DIR}/manifest.yaml"
+  source "${CONFIG_SRC}/host/opt/gitea/bundle-builder/common.sh"
+  read -r -p 'Nexus 관리 사용자 ID: ' NEXUS_USER
+  read -r -s -p 'Nexus 비밀번호: ' NEXUS_PASSWORD
+  printf '\n'
+  list="$(mktemp)"
+  trap 'rm -f -- "${list}"' EXIT
+  awk -F'"' '/^  - path:/{path=$2} /^    sha256:/{print path "|" $2}' \
+    "${SEED_DIR}/manifest.yaml" > "${list}"
+  test -s "${list}"
+  while IFS='|' read -r path expected; do
+    [[ "${expected}" =~ ^[0-9a-f]{64}$ ]]
+    test "$(sha256sum "${SEED_DIR}/raw/${path}" | awk '{print $1}')" = "${expected}"
+    nexus_curl -fsS --upload-file "${SEED_DIR}/raw/${path}" \
+      "${NEXUS_URL}/repository/${RAW_REPOSITORY}/${path}"
+    actual="$(nexus_curl -fsS "${NEXUS_URL}/repository/${RAW_REPOSITORY}/${path}" \
+      | sha256sum | awk '{print $1}')"
+    test "${actual}" = "${expected}"
+    printf 'Verified Raw: %s\n' "${path}"
+  done < "${list}"
+)
 ```
 
-Docker는 load 후 새 서버의 같은 Repository 경로에 tag·push한다.
+컨테이너 이미지 최초 등록도 **Skopeo로 원본 manifest를 보존**한다. Docker load·push 과정에서 OCI manifest가 Docker 형식으로 바뀌면 내용상 같은 이미지라도 digest가 달라질 수 있다. 반대로 새 이미지를 처음 Docker push로 등록했다면, 그때 Nexus에 게시된 digest를 새 기준으로 기록하면 된다.
 
-```bash title="Docker 최초 등록"
-registry="${NEXUS_URL#https://}"
-install -d -m 0755 "/etc/containerd/certs.d/${registry}"
-printf 'server = "%s"\n[host."%s"]\n capabilities = ["pull", "resolve", "push"]\n skip_verify = true\n' \
-  "${NEXUS_URL}" "${NEXUS_URL}" > "/etc/containerd/certs.d/${registry}/hosts.toml"
-nerdctl load -i "${SEED_DIR}/images/release-images.tar"
-printf '%s' "${NEXUS_PASSWORD}" | nerdctl login --username "${NEXUS_USER}" --password-stdin "${registry}"
-while IFS='|' read -r original name tag digest; do
-  target="${registry}/${DOCKER_REPOSITORY}/${name}:${tag}"
-  nerdctl tag "${original}" "${target}"
-  nerdctl push "${target}"
-  actual="$(nexus_curl -fsSI \
-    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
-    "${NEXUS_URL}/v2/${DOCKER_REPOSITORY}/${name}/manifests/${tag}" \
-    | awk 'tolower($1)=="docker-content-digest:" {gsub("\r", "", $2); print $2; exit}')"
-  test "${actual}" = "${digest}" || exit 1
-done < "${SEED_DIR}/images/image-map.txt"
-nerdctl logout "${registry}"
-unset NEXUS_PASSWORD
+배포 TAR의 이미지 아카이브에는 Docker manifest와 OCI manifest·index가 함께 있을 수 있다. 이를 무조건 `oci:` transport로 읽지 않고, 다음 펼침 절차에서 각 원본 manifest와 blob을 `dir:` 형식으로 연결한다. Docker·containerd 데몬 설정은 바꾸지 않는다.
+
+<details class="analysis-toggle" markdown="1">
+<summary>이미지 최초 등록 — OCI·Docker manifest 혼합 아카이브에서 digest 보존</summary>
+
+아래는 검증한 seed를 빈 Repository에 등록하는 절차다. 별도 영구 스크립트를 설치하지 않는다. 임시 디렉터리에 아카이브를 풀며, blob은 하드링크로 연결해 이미지별 중복 복사를 피한다.
+
+```bash
+(
+  set -euo pipefail
+  : "${CONFIG_SRC:?Set CONFIG_SRC}" "${SEED_DIR:?Set SEED_DIR}"
+  test -s "${SEED_DIR}/images/release-images.tar"
+  test -s "${SEED_DIR}/images/image-map.txt"
+  source "${CONFIG_SRC}/host/opt/gitea/bundle-builder/common.sh"
+  read -r -p 'Nexus 이미지 게시 사용자 ID: ' NEXUS_USER
+  read -r -s -p 'Nexus 비밀번호: ' NEXUS_PASSWORD
+  printf '\n'
+  export IMAGE_IMPORT_DIR="$(mktemp -d "${SEED_DIR}/.image-import.XXXXXX")"
+  trap 'rm -rf -- "${IMAGE_IMPORT_DIR}"' EXIT
+  tar -xf "${SEED_DIR}/images/release-images.tar" -C "${IMAGE_IMPORT_DIR}"
+  python3 - <<'PY'
+import hashlib
+import json
+import os
+import re
+import shutil
+from pathlib import Path
+
+layout = Path(os.environ["IMAGE_IMPORT_DIR"])
+blobs = layout / "blobs/sha256"
+index = json.loads((layout / "index.json").read_text())
+digests = {item["digest"] for item in index["manifests"]}
+sources = []
+for blob in blobs.iterdir():
+    assert re.fullmatch(r"[0-9a-f]{64}", blob.name) and blob.is_file()
+    with blob.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == blob.name
+    sources.append(blob)
+for row in (Path(os.environ["SEED_DIR"]) / "images/image-map.txt").read_text().splitlines():
+    original, name, tag, digest = row.split("|")
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest) and digest in digests
+    view = layout / "upload" / digest.removeprefix("sha256:")
+    if view.exists():
+        continue
+    view.mkdir(parents=True)
+    for blob in sources:
+        os.link(blob, view / blob.name)
+        with blob.open("rb") as stream:
+            if not stream.read(1) == b"{":
+                continue
+            stream.seek(0)
+            try:
+                manifest = json.load(stream)
+            except (ValueError, UnicodeError):
+                continue
+        if isinstance(manifest, dict) and manifest.get("schemaVersion") == 2:
+            if "layers" in manifest or "manifests" in manifest:
+                os.link(blob, view / (blob.name + ".manifest.json"))
+    shutil.copyfile(blobs / digest.removeprefix("sha256:"), view / "manifest.json")
+    (view / "version").write_text("Directory Transport version: 1.1\n")
+PY
+  registry="${NEXUS_URL#https://}"
+  tls=true
+  [[ "${TLS_SKIP_VERIFY}" != true ]] || tls=false
+  auth_file="${IMAGE_IMPORT_DIR}/auth.json"
+  printf '%s' "${NEXUS_PASSWORD}" | skopeo login \
+    --authfile "${auth_file}" --tls-verify="${tls}" \
+    --username "${NEXUS_USER}" --password-stdin "${registry}"
+  while IFS='|' read -r original name tag digest; do
+    target="${registry}/${DOCKER_REPOSITORY}/${name}:${tag}"
+    source_dir="${IMAGE_IMPORT_DIR}/upload/${digest#sha256:}"
+    skopeo copy --all --preserve-digests --authfile "${auth_file}" \
+      --dest-tls-verify="${tls}" "dir:${source_dir}" "docker://${target}"
+    actual="$(nexus_curl -fsSI \
+      -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+      "${NEXUS_URL}/v2/${DOCKER_REPOSITORY}/${name}/manifests/${tag}" \
+      | awk 'tolower($1)=="docker-content-digest:" {gsub("\r", "", $2); print $2; exit}')"
+    test "${actual}" = "${digest}"
+    printf 'Verified Image: %s\n' "${target}"
+  done < "${SEED_DIR}/images/image-map.txt"
+)
 ```
 
-기존 경로를 덮어쓰는 명령이 아니다. 실패 후에는 같은 파일을 무조건 재게시하지 않고 이미 있는 파일의 SHA256·이미지 digest를 확인한다.
+`--preserve-digests`는 원본 형식을 바꿔서 해시를 맞추는 옵션이 아니다. 보존할 수 없으면 실패시키는 옵션이다. 근거: [Skopeo copy](https://github.com/podman-container-tools/skopeo/blob/main/docs/skopeo-copy.1.md), [dir transport](https://github.com/containers/image/blob/main/docs/containers-transports.5.md).
+
+</details>
+
+이미 등록한 경로의 재게시가 거절되면 Deployment policy와 기존 해시를 먼저 확인한다. 잘못 변환된 Tag가 있다면 관리자가 그 Tag만 확인해 정리한 뒤 등록한다. 저장소 전체 삭제나 정상 Tag 덮어쓰기로 해결하지 않는다.
+
+인증이 401이면 업로드를 중단하고 사용자 ID의 앞뒤 공백·비밀번호·계정 상태를 확인한다. 429이면 반복 시도 중인 CLI·브라우저 요청도 멈춘 뒤 제한 시간을 기다린다. 비밀번호를 바꿔도 잘못된 자격정보로 계속 요청하면 다시 제한될 수 있다.
 
 </div>
 
@@ -811,6 +964,7 @@ tar -C "${SEED_DIR}/git/init-container" --exclude='./.git' --exclude='./.gitea/w
 cd /root/private-cloud-v4
 install -d .gitea/workflows
 install -m 0644 "${CONFIG_SRC}/repository/workflows/publish-manifest.yaml" .gitea/workflows/publish-manifest.yaml
+install -m 0644 "${CONFIG_SRC}/repository/pull_request_template.md" .gitea/pull_request_template.md
 install -m 0644 "${CONFIG_SRC}/repository/gitignore" .gitignore
 git init -b master
 read -r -p 'Commit author name: ' author_name
@@ -827,6 +981,29 @@ git -c http.sslVerify=false push -u origin develop
 ```
 
 제품 install.sh, containerd.service, nerdctl.toml, BuildKit 설정과 Ansible 코드를 보존한다. **대용량 파일을 Git에서 빼는 것과 작은 서비스 설정까지 지우는 것은 다르다.**
+
+`.gitignore`는 배포 아카이브·VM 이미지와 편집기 임시파일 등만 제외한다. Ansible이 읽는 `id_rsa`·PEM을 포괄 패턴으로 숨기지 않는다. OpenTofu 프로젝트는 `/var/lib/gitea-runner/opentofu`에서 별도로 관리하며, State·plan을 제품 저장소에 복사하지 않는다. `.gitignore`만 추가해도 이미 추적 중인 파일이나 과거 이력이 사라지는 것은 아니다.
+
+PR 설명 템플릿은 `.gitea/pull_request_template.md`에 둔다. 파일 이름·위치를 Gitea가 인식하므로 별도 UI 등록은 필요 없다. 변경 설명은 PR에서 정리하고 최종 게시 후 Gitea Release 본문에 복사한다.
+
+<details class="analysis-toggle" markdown="1">
+<summary>.gitea/pull_request_template.md — 변경 설명용 템플릿</summary>
+
+<div class="highlight" data-source-path="repository/pull_request_template.md"><pre><code><span class="gu">## v버전 입력 (YYYY. MM. DD.)</span>
+
+<span class="gu">### 기능 개선/변경</span>
+
+<span class="k">-</span><span class="w"> </span>[기능 추가]
+<span class="w">  </span><span class="k">-</span><span class="w"> </span>변경 내용
+<span class="k">-</span><span class="w"> </span>[기능 개선]
+<span class="w">  </span><span class="k">-</span><span class="w"> </span>변경 내용
+<span class="k">-</span><span class="w"> </span>[버그 수정]
+<span class="w">  </span><span class="k">-</span><span class="w"> </span>변경 내용
+<span class="k">-</span><span class="w"> </span>[버전 변경]
+<span class="w">  </span><span class="k">-</span><span class="w"> </span>변경 내용
+</code></pre></div>
+
+</details>
 
 <details class="analysis-toggle" markdown="1">
 <summary>repository/release/manifest.example.yaml — 전체 내용</summary>
@@ -1041,7 +1218,7 @@ full 시험의 inventory는 `192.0.2.101~104`와 맞춘다. 처음 3대는 Contr
 | Manually merged | 체크 해제 | 수동으로 병합됨 표시하는 방식은 사용하지 않음 |
 | Default Merge Style | Create merge commit | PR 병합 버튼의 기본 방식 |
 
-파이프라인은 병합 커밋의 두 번째 부모를 이용해 승인받은 PR의 소스 커밋을 확인한다. **기본 병합 방식만 바꾸는 것이 아니라 다른 방식의 허용 체크도 해제한다.**
+파이프라인은 Tag가 master 대상 PR의 실제 병합 커밋을 가리키고 부모가 두 개인지 확인한다. 필수 승인 수나 리뷰의 commit_id를 다시 조회하는 로직은 없다. **기본 병합 방식만 바꾸는 것이 아니라 다른 방식의 허용 체크도 해제한다.**
 
 **같은 화면 아래의 추가 PR 옵션**
 
@@ -1050,14 +1227,16 @@ full 시험의 inventory는 `192.0.2.101~104`와 맞춘다. 처음 3대는 Contr
 | Allow edits from maintainers by default | 해제 | 외부 포크 작성자의 브랜치 수정 권한을 기본 허용하지 않음. Team의 기존 쓰기 권한은 유지 |
 | Enable updating pull request branch by rebase | 해제 | 공유 develop의 이력을 rebase로 바꾸지 않음. 최종 PR 병합 방식과는 별도 옵션 |
 | Delete pull request branch after merge by default | 해제 | develop → master PR에서 develop 삭제를 기본 선택하지 않음 |
-| Enable autodetect manual merge | 해제 | 로컬 병합을 자동 감지하지 않고 웹 PR 승인·병합으로 운영 |
+| Enable autodetect manual merge | 해제 | 로컬 병합을 자동 감지하지 않고 웹 PR 병합으로 운영 |
 | Ignore whitespace conflicts | 해제 | 공백 차이도 검토. Ansible YAML 문법 검사는 별도로 수행 |
 
 **Update Settings**로 저장한 뒤 다시 페이지를 열어 값이 유지되는지 확인한다. feature 브랜치는 develop에 병합한 뒤 해당 브랜치만 확인해 삭제한다. master·develop은 유지한다. [Gitea 1.25.4 Repository 설정 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/options.tmpl)
 
+이 글은 Team 기준이다. CI 계정 하나에만 권한을 줄 때는 저장소 **Settings → Collaborators**에서 해당 사용자를 추가하고 Read를 지정할 수도 있다. 병합 담당자도 개인으로 관리한다면 브랜치 규칙의 merging 허용 목록과 Tag 보호의 사용자 목록에 그 계정을 지정한다. 검토·병합만을 위해 사이트 관리자 권한까지 부여할 필요는 없다.
+
 </div>
 
-<p class="subsection-title"><strong>7-2. master — 직접 push 금지, 승인 후 PR 병합</strong></p>
+<p class="subsection-title"><strong>7-2. master — 직접 push 금지, PR 병합만 허용</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -1073,15 +1252,15 @@ full 시험의 inventory는 `192.0.2.101~104`와 맞춘다. 처음 3대는 Contr
 | --- | --- | --- |
 | Push | **Disable Push** | 직접 push·웹 코드 편집 등으로 master를 바로 변경하지 않음 |
 | Force Push | **Disable Force Push** | 강제 push로 이력을 바꾸지 않음 |
-| Required approvals | **1** | 작성자가 아닌 검토자의 승인 1개 필요 |
-| Restrict approvals to allowlisted users or teams | 체크 | 승인 수에 포함할 검토자를 제한 |
-| Allowlisted teams for reviews | **reviewers** | 6-2절에서 만든 검토 Team 선택 |
-| Dismiss stale approvals | 체크 | PR 내용이 바뀌는 새 commit이 올라오면 이전 승인 취소 |
-| Ignore stale approvals | 해제 또는 비활성 상태 유지 | 위의 승인 취소 기능을 사용하므로 별도 사용하지 않음 |
+| Required approvals | **0** | 승인 개수를 병합 필수 조건으로 두지 않음 |
+| Restrict approvals to allowlisted users or teams | 해제 | 필수 승인자를 지정하지 않음 |
+| Allowlisted teams for reviews | 빈 값 | 승인 수를 위한 Team 제한 없음 |
+| Dismiss stale approvals | 해제 | 승인 개수 검사와 연동하지 않음 |
+| Ignore stale approvals | 해제 | 별도 승인 예외를 사용하지 않음 |
 | Merge | **Enable Merge Allowlist** | PR 병합 버튼을 누를 담당자 제한 |
 | Allowlisted teams for merging | **reviewers** | reviewers 구성원만 PR 병합 수행 |
 | Block merge on rejected reviews | 체크 | 공식 검토자의 변경 요청이 남아 있으면 병합 차단 |
-| Administrators must follow branch protection rules | 체크 | 관리자도 승인 조건을 건너뛰는 강제 병합을 하지 않음 |
+| Administrators must follow branch protection rules | 체크 | 관리자도 직접 push 금지 등 보호 규칙을 따름 |
 
 Team 선택 칸은 이름을 타이핑만 하지 말고 **검색 결과의 reviewers를 눌러 선택된 항목으로 들어갔는지** 확인한다. 조직에 팀이 있다는 것과 이 규칙의 허용 목록에 선택됐다는 것은 별개다. 사이트 관리자도 실제 검토·병합을 맡는다면 본인의 개인 계정을 reviewers에 연결하고 동일한 규칙을 따른다.
 
@@ -1090,7 +1269,7 @@ Team 선택 칸은 이름을 타이핑만 하지 말고 **검색 결과의 revie
 | 나머지 항목 | 값 | 이유 |
 | --- | --- | --- |
 | Enable Status Check | 해제 | 현재 Workflow는 Tag 발행 후 실행된다. 아직 없는 PR 시험 결과를 병합 필수 조건으로 걸지 않음 |
-| Block merge on official review requests | 해제 | 별도 미응답 리뷰 요청 차단은 사용하지 않음. 필수 승인 1개와 거절 리뷰 차단은 유지 |
+| Block merge on official review requests | 해제 | 별도 미응답 리뷰 요청 차단은 사용하지 않음. 거절 리뷰 차단은 유지 |
 | Block merge if pull request is outdated | 해제 | base 브랜치의 모든 변경을 미리 반영하도록 강제하지 않음. 충돌 해결·검토는 별도 |
 | Require signed commits | 해제 | GPG·SSH 커밋 서명 체계를 구성하기 전에는 필수화하지 않음 |
 | Protected file patterns | 빈 값 | 지정한 파일의 변경 자체를 차단하는 규칙은 사용하지 않음 |
@@ -1098,7 +1277,7 @@ Team 선택 칸은 이름을 타이핑만 하지 말고 **검색 결과의 revie
 
 상태 검사를 나중에 추가하려면 **PR에서 먼저 실행되는 검증 Workflow**를 만든 뒤, 그 작업의 실제 상태 이름을 필수 검사로 지정한다. Tag 패키징 작업을 master 병합의 선행 조건으로 걸면 실행 순서가 맞지 않는다.
 
-승인과 병합은 별도 동작이다. 검토자는 PR의 Files Changed를 읽고 Approve한 뒤, 조건이 충족되면 **Create merge commit**으로 병합한다. 승인 버튼을 누른 것만으로 master가 변경되는 것은 아니다. [브랜치 보호 동작](https://docs.gitea.com/1.25/usage/access-control/protected-branches/) · [1.25.4 규칙 입력 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/protected_branch.tmpl)
+승인과 병합은 별도 동작이다. 현재는 필수 승인이 0개이므로 Approve를 하지 않아도 다른 조건을 만족한 PR은 허용된 담당자가 **Create merge commit**으로 병합할 수 있다. 이는 master 직접 push 허용이나 모든 사용자에게 병합 권한을 부여한다는 뜻이 아니다. 변경 요청이 남아 있다면 위의 거절 리뷰 차단 규칙을 따른다. [브랜치 보호 동작](https://docs.gitea.com/1.25/usage/access-control/protected-branches/) · [1.25.4 규칙 입력 화면](https://github.com/go-gitea/gitea/blob/v1.25.4/templates/repo/settings/protected_branch.tmpl)
 
 </div>
 
@@ -1125,7 +1304,7 @@ Status Check·서명 필수·오래된 PR 차단·미응답 리뷰 요청 차단
 
 설정 후 Protected Branches 목록에 `master`, `develop` 규칙 두 개가 각각 보이는지 확인한다. developers·reviewers는 대상 저장소에 Code Write도 있어야 한다. 브랜치 허용 목록에 팀만 추가했다고 Read 권한이 Write로 바뀌지는 않는다. ci-readers는 push 허용 목록에 넣지 않는다.
 
-일상 개발은 develop 직접 push 또는 feature → develop PR을 사용할 수 있다. 이 둘 중 하나만 강제하는 규칙은 두지 않는다. **develop → master는 PR과 승인 없이 직접 push할 수 없다.**
+일상 개발은 develop 직접 push 또는 feature → develop PR을 사용할 수 있다. 이 둘 중 하나만 강제하는 규칙은 두지 않는다. **develop → master 반영은 PR 병합을 거친다. 필수 승인 개수는 0이다.**
 
 </div>
 
@@ -1140,14 +1319,14 @@ Status Check·서명 필수·오래된 PR 차단·미응답 리뷰 요청 차단
 3. **Allowed teams**에서 **reviewers**를 검색해 선택한다. Allowed users는 개인 예외가 없다면 비운다. 두 칸을 모두 비우면 해당 패턴의 Tag 발행이 차단된다.
 4. **Protect Tag**로 저장한다. 목록에 `v*`와 허용 팀 reviewers가 표시되는지 확인한다.
 
-`v*`는 v4.1.3 같은 이름을 폭넓게 보호하는 패턴이고, 파이프라인은 추가로 `v숫자.숫자.숫자` 형식을 검사한다. 이 규칙은 Tag의 발행자를 제한할 뿐, Tag가 승인된 커밋을 가리키는지까지 확인하는 기능은 아니다. 그 검사는 Workflow의 정책 확인 단계가 수행한다. 이미 발행한 Tag는 이동·재사용하지 않고 새 패치 버전을 발행한다. [Gitea Tag 보호](https://docs.gitea.com/1.25/usage/access-control/protected-tags/)
+`v*`는 v4.1.3 같은 이름을 폭넓게 보호하는 패턴이고, 파이프라인은 추가로 `v숫자.숫자.숫자` 형식을 검사한다. 이 규칙은 Tag의 발행자를 제한할 뿐, Tag가 올바른 릴리스 커밋을 가리키는지까지 확인하는 기능은 아니다. 그 검사는 Workflow의 정책 확인 단계가 수행한다. 이미 발행한 Tag는 이동·재사용하지 않고 새 패치 버전을 발행한다. [Gitea Tag 보호](https://docs.gitea.com/1.25/usage/access-control/protected-tags/)
 
 **시험 생략 라벨 생성**
 
 1. 저장소의 **Issues 또는 Pull Requests → Labels**를 연다.
-2. **New Label**에서 이름을 `release:skip-test`로 지정한다. 설명은 `VMware·OpenStack 배포 시험 생략`처럼 용도를 적고 저장한다. 색상은 동작에 영향이 없다.
+2. **New Label**에서 이름을 `skip-test`로 지정한다. 설명은 `VMware·OpenStack 배포 시험 생략`처럼 용도를 적고 저장한다. 색상은 동작에 영향이 없다.
 3. 이름이 `services.env`의 `TEST_SKIP_LABEL`과 같은지 확인한다. 다른 이름을 쓰려면 설정값도 함께 바꾼다.
-4. 검토자는 해당 PR의 오른쪽 **Labels**에서 라벨을 선택한 뒤 승인·병합한다. 일반 시험을 할 PR에는 이 라벨을 붙이지 않는다.
+4. 릴리스 담당자는 해당 PR의 오른쪽 **Labels**에서 라벨을 선택한 뒤 병합한다. 일반 시험을 할 PR에는 이 라벨을 붙이지 않는다. Approve는 선택이며 필수 승인 개수는 0이다.
 
 Gitea 라벨 자체에 시험 생략 기능이 있는 것은 아니다. Runner가 이 이름을 읽어 full·skip을 결정한다. 현재 구성은 실행할 때 PR의 현재 라벨을 다시 읽는다. 이후 같은 Tag를 full로 재실행하려면 라벨을 제거하고 Actions에서 기존 Tag로 수동 실행한다.
 
@@ -1157,8 +1336,8 @@ Gitea 라벨 자체에 시험 생략 기능이 있는 것은 아니다. Runner�
 | --- | --- |
 | developers의 develop 직접 push | 허용 |
 | developers의 master 직접 push | 거절 |
-| master 대상 PR에 승인 없음 | 병합 불가 |
-| reviewers가 유효한 승인 후 일반 병합 | master 반영 가능 |
+| master 대상 PR에 승인 없음 | 다른 조건을 만족하면 병합 허용 담당자가 병합 가능 |
+| reviewers가 일반 PR 병합 | master 반영 가능 |
 | ci-reader의 코드 push·Tag 발행 | 불가 |
 | reviewers의 릴리스 Tag 발행 | 허용되며 Workflow 실행 조건이 됨 |
 
@@ -1414,7 +1593,10 @@ export_test_inputs<span class="o">()</span><span class="w"> </span><span class="
 <span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"candidates/</span><span class="si">${</span><span class="nv">id</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">sha</span><span class="si">}</span><span class="s2">/contrabass-engine-deploy.tar"</span><span class="w"> </span><span class="o">]]</span>
 <span class="w">  </span><span class="nb">test</span><span class="w"> </span>-r<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TOFU_SSH_PRIVATE_KEY</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nb">test</span><span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TOFU_SSH_PUBLIC_KEY</span><span class="si">}</span><span class="s2">"</span>
-<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">TF_VAR_bundle_url</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_URL</span><span class="p">%/</span><span class="si">}</span><span class="s2">/repository/</span><span class="si">${</span><span class="nv">STAGING_REPOSITORY</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">path</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DOWNLOAD_URL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>https://*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'NEXUS_DOWNLOAD_URL must be an HTTPS base URL.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
+<span class="w">  </span><span class="o">}</span>
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">TF_VAR_bundle_url</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_DOWNLOAD_URL</span><span class="p">%/</span><span class="si">}</span><span class="s2">/repository/</span><span class="si">${</span><span class="nv">STAGING_REPOSITORY</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">path</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">TF_VAR_bundle_sha256</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">sha</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">TF_VAR_ssh_private_key_path</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">TOFU_SSH_PRIVATE_KEY</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">TF_VAR_ssh_public_key</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>&lt;<span class="s2">"</span><span class="si">${</span><span class="nv">TOFU_SSH_PUBLIC_KEY</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
@@ -1481,29 +1663,13 @@ select_test_mode<span class="o">()</span><span class="w"> </span><span class="o"
 <span class="w">    </span>jq<span class="w"> </span>-e<span class="w"> </span>--arg<span class="w"> </span>sha<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">commit</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--arg<span class="w"> </span>branch<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RELEASE_BRANCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">      </span><span class="s1">'.merged == true and .merge_commit_sha == $sha and .base.ref == $branch'</span><span class="w"> </span><span class="se">\</span>
 <span class="w">      </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
-<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Tag must point to the approved master PR merge commit.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
+<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Tag must point to the release PR merge commit.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
 <span class="w">    </span><span class="o">}</span>
 <span class="w">    </span><span class="nv">pr</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.number'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="k">)</span><span class="s2">"</span>
 <span class="w">    </span>gitea_get<span class="w"> </span><span class="s2">"pulls/</span><span class="si">${</span><span class="nv">pr</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="w">    </span>gitea_get<span class="w"> </span><span class="s2">"git/commits/</span><span class="si">${</span><span class="nv">commit</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/merge.json"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span><span class="s1">'.parents | length'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/merge.json"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
 <span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Release PRs must use a normal merge commit (not squash/rebase).'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
-<span class="w">    </span><span class="o">}</span>
-<span class="w">    </span><span class="nv">reviewed_sha</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">'.parents[1].sha'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/merge.json"</span><span class="k">)</span><span class="s2">"</span>
-<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'[]\n'</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/reviews.json"</span>
-<span class="w">    </span><span class="nv">page</span><span class="o">=</span><span class="m">1</span>
-<span class="w">    </span><span class="k">while</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<span class="w">      </span>gitea_get<span class="w"> </span><span class="s2">"pulls/</span><span class="si">${</span><span class="nv">pr</span><span class="si">}</span><span class="s2">/reviews?limit=50&amp;page=</span><span class="si">${</span><span class="nv">page</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/page.json"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
-<span class="w">      </span>jq<span class="w"> </span>-s<span class="w"> </span><span class="s1">'.[0] + .[1]'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/reviews.json"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/page.json"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/combined.json"</span>
-<span class="w">      </span>mv<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/combined.json"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/reviews.json"</span>
-<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>jq<span class="w"> </span><span class="s1">'length'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/page.json"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span>-ge<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
-<span class="w">      </span><span class="nv">page</span><span class="o">=</span><span class="k">$((</span><span class="nv">page</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">1</span><span class="k">))</span>
-<span class="w">    </span><span class="k">done</span>
-<span class="w">    </span>jq<span class="w"> </span>-e<span class="w"> </span>--arg<span class="w"> </span>sha<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">reviewed_sha</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
-<span class="w">      </span><span class="s1">'[.[] | select(.official == true and .dismissed != true and .stale != true</span>
-<span class="s1">        and .state == "APPROVED" and .commit_id == $sha)] | length &gt;= 1'</span><span class="w"> </span><span class="se">\</span>
-<span class="w">      </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/reviews.json"</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
-<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'PR has no valid approval for its reviewed head commit.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
 <span class="w">    </span><span class="o">}</span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span>jq<span class="w"> </span>-e<span class="w"> </span>--arg<span class="w"> </span>label<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TEST_SKIP_LABEL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">      </span><span class="s1">'any(.labels[]?; .name == $label)'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">scratch</span><span class="si">}</span><span class="s2">/pr.json"</span><span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="nv">mode</span><span class="o">=</span>skip<span class="p">;</span><span class="w"> </span><span class="k">fi</span>
@@ -1517,7 +1683,7 @@ select_test_mode<span class="o">()</span><span class="w"> </span><span class="o"
 <span class="w">    </span><span class="nv">master_line</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">master_release</span><span class="p">%.*</span><span class="si">}</span><span class="s2">"</span>
 <span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">master_line</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">      </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">master_line</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-V<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">line</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
-<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'A new current/future-line tag requires an approved master PR.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
+<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'A new current/future-line tag requires a merged release-branch PR.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
 <span class="w">    </span><span class="o">}</span>
 <span class="w">    </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>git<span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_dir</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>cat-file<span class="w"> </span>-t<span class="w"> </span><span class="s2">"refs/tags/</span><span class="si">${</span><span class="nv">tag</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>tag<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
 <span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Use an annotated tag: git tag -a VERSION -m MESSAGE.'</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span>
@@ -2304,6 +2470,7 @@ cmp<span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><s
 <span class="o">}</span>
 <span class="nb">source</span><span class="w"> </span>/etc/gitea-runner-env/bundle-pipeline.env
 <span class="nb">source</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BUNDLE_BUILDER_DIR</span><span class="si">}</span><span class="s2">/common.sh"</span>
+require_commands<span class="w"> </span>socat<span class="w"> </span>flock<span class="w"> </span>awk<span class="w"> </span>chmod<span class="w"> </span>mv
 <span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>NEXUS_PASSWORD
 
 <span class="nv">channel</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span>
@@ -2335,21 +2502,21 @@ flock<span class="w"> </span><span class="m">9</span>
 
 <span class="nv">map_temp</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">.XXXXXX"</span><span class="k">)</span><span class="s2">"</span>
 <span class="nb">trap</span><span class="w"> </span><span class="s1">'rm -f -- "${map_temp}"'</span><span class="w"> </span>EXIT
-<span class="nv">map_action</span><span class="o">=</span>add
-<span class="k">if</span><span class="w"> </span>awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">alias_path</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s1">'$1 == alias_path {found=1} END {exit !found}'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">  </span><span class="nv">map_action</span><span class="o">=</span><span class="nb">set</span>
-<span class="k">fi</span>
 awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">alias_path</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s1">'$1 != alias_path'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
 <span class="nb">printf</span><span class="w"> </span><span class="s1">'%s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
 chmod<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
-mv<span class="w"> </span>-f<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_action</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'set map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="p">|</span><span class="w"> </span>socat<span class="w"> </span>-t<span class="w"> </span><span class="m">5</span><span class="w"> </span>-<span class="w"> </span><span class="s2">"UNIX-CONNECT:</span><span class="si">${</span><span class="nv">HAPROXY_SOCKET</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s1">'entry not found'</span>*<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s1">'pattern not found'</span>*<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'add map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>socat<span class="w"> </span>-t<span class="w"> </span><span class="m">5</span><span class="w"> </span>-<span class="w"> </span><span class="s2">"UNIX-CONNECT:</span><span class="si">${</span><span class="nv">HAPROXY_SOCKET</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
+<span class="k">fi</span>
 <span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s2">"New entry added"</span>*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
 <span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"HAProxy map update failed: </span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
 <span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="o">}</span>
+mv<span class="w"> </span>-f<span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span>
 
 nexus_curl<span class="w"> </span>-fsSIL<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">PUBLIC_RELEASE_URL</span><span class="p">%/</span><span class="si">}${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-o<span class="w"> </span>/dev/null
@@ -3009,6 +3176,10 @@ bash -n "${BUNDLE_BUILDER_DIR}/build-bundle.sh"
 
 최초 map은 주석만 있다. 아직 없는 TAR로 임의의 연결을 만들지 않는다. 게시가 성공하면 update-release-alias가 디스크 파일과 Runtime map을 함께 갱신한다.
 
+`socat`은 Unix socket으로 HAProxy Runtime API 명령을 전달하는 도구다. 2절에서 설치하며, wrapper도 실행 전에 존재 여부를 확인한다. 기존 항목은 `set map`, 메모리에 없는 항목은 `add map`으로 처리한다. 디스크 파일의 키 존재만 보고 `set`을 선택하지 않으므로 파일과 실행 중 map이 다르더라도 `entry not found`를 그대로 실패시키지 않는다.
+
+Runtime API는 메모리만 바꾸므로 성공한 내용을 디스크에도 저장해야 재시작 후 유지된다. 제공 wrapper는 Runtime 변경이 성공한 뒤 파일을 원자적으로 교체한다. 평소에는 map 파일을 비우거나 HAProxy를 재시작하는 것이 아니라 이 wrapper를 통해 갱신한다. [HAProxy add map](https://www.haproxy.com/documentation/haproxy-runtime-api/reference/add-map/) · [set map](https://www.haproxy.com/documentation/haproxy-runtime-api/reference/set-map/)
+
 ```bash title="HAProxy 배치·설정 검사·기동"
 source /etc/gitea-runner-env/services.env
 install -d -m 0755 /etc/haproxy /etc/systemd/system/haproxy.service.d
@@ -3106,6 +3277,8 @@ nmcli -g connection.interface-name connection show uuid "${profile_uuid}"
 ```
 
 root SSH 접속이 가능한 템플릿이어야 한다. Runner는 공개키, 제품 Ansible은 제품 설정에 정의한 인증을 사용한다. VM의 root 비밀번호와 제품 `server_password`를 맞추고 SSH 정책도 확인한다. 암호를 공개 manifest·Git에 기록하지 않는다.
+
+`server_password`는 배포 대상 노드 인증용이다. Ansible 컨테이너의 기존 계정 비밀번호와 같은 변수로 통합하지 않는다. OpenTofu가 사용하는 Runner 개인키도 컨테이너에서 노드로 접속할 인증과 별개다.
 
 공개키는 복제 후 스크립트가 넣으므로 콘솔에서 긴 키를 직접 입력할 필요가 없다. Runner 키가 바뀌어도 다음 복제에는 새로운 공개키를 전달한다.
 
@@ -3849,6 +4022,8 @@ provider 최초 설치는 외부 Registry 통신이 필요하다. 폐쇄된 Runn
 
 이 단계에서 apply하지 않는다. VM 생성과 Ansible 실행은 Tag Workflow에서 시작한다.
 
+상대 경로의 QCOW2를 찾지 못하면 `OPENSTACK_TEST_DIR`와 파일명·Runner 읽기 권한을 확인한다. IP·공개키를 바꿨다면 VM이 실제로 받은 값과 `lab.auto.tfvars`를 대조한다. `deployment.tf.bak`는 OpenTofu가 읽지 않으므로 실제 파일명이 `deployment.tf`인지도 확인한다.
+
 </div>
 
 ---
@@ -4209,7 +4384,7 @@ provider 최초 설치는 외부 Registry 통신이 필요하다. 폐쇄된 Runn
 Workflow는 하나다. 별도의 retry·verify Workflow를 함께 돌리지 않는다. Tag의 소스를 한 번 shallow clone하고 같은 소스로 manifest·TAR를 만든다.
 
 ```text title="시험 선택과 처리 흐름"
-Tag → 승인 PR 또는 과거 계열 패치 확인 → full / skip
+Tag → 병합된 릴리스 PR 또는 과거 계열 패치 확인 → full / skip
   full: TAR → staging → VMware VM → deploy.sh → Ansible → OpenStack 시험
                                      → 동일 SHA256의 TAR 최종 게시
   skip: TAR → 재료·TAR 검증 → 최종 게시
@@ -4243,14 +4418,14 @@ journalctl -u gitea-runner -n 30 --no-pager
 
 1. developer 계정으로 develop의 manifest release를 다음 번호로 수정하고 commit·push한다. 코드만 변경하더라도 새 릴리스라면 manifest의 release를 새 번호로 맞춘다.
 2. 저장소 상단 **Pull Requests → New Pull Request**에서 **base는 master, compare는 develop**으로 선택한다. 반대로 선택하지 않는다. 제목에 릴리스 버전을 적고 변경 파일을 확인해 PR을 생성한다.
-3. 별도 reviewer 계정으로 해당 PR을 열어 **Files Changed**를 검토한다. 이번 최초 시험은 PR의 **Labels**에 `release:skip-test`를 선택한다.
-4. 검토 화면의 **Review → Approve**로 승인한다. 승인 후에도 PR이 열린 상태일 수 있다. **Conversation**으로 돌아와 조건을 확인하고 **Create merge commit**으로 병합한다.
+3. 병합 권한이 있는 reviewer 계정으로 해당 PR을 열어 **Files Changed**를 검토한다. 이번 최초 시험은 PR의 **Labels**에 `skip-test`를 선택한다.
+4. 필수 승인 0개이므로 Approve는 선택이다. **Conversation**에서 조건을 확인하고 **Create merge commit**으로 병합한다. 승인 버튼과 실제 병합은 별도 동작이다.
 5. PR에 Merged가 표시되고 master에 새 병합 커밋이 생긴 것을 확인한다. 이 단계는 코드 반영이고, 아직 Tag를 발행한 것은 아니다. develop 브랜치는 삭제하지 않는다.
 6. Tag push는 reviewers 팀의 릴리스 담당자가 수행한다. 아래 명령에서 **방금 PR을 병합한 정확한 commit**을 지정한다. 다른 PR이 이어서 병합됐다면 master의 현재 HEAD가 이번 릴리스 커밋과 다를 수 있다.
 
 아래는 manifest를 4.1.3으로 수정한 예다. Gitea PR 화면에서 발행할 정확한 merge commit을 확인해 입력한다.
 
-```bash title="승인·merge한 commit에 Tag 발행"
+```bash title="PR로 merge한 commit에 Tag 발행"
 cd /root/private-cloud-v4
 git -c http.sslVerify=false fetch origin master
 read -r -p 'Release merge commit: ' release_commit
@@ -4267,7 +4442,7 @@ Actions에서 policy가 skip이고 VM 시험 없이 최종 게시·channel 갱�
 
 1. 저장소의 **Releases → New Release**를 연다.
 2. **Tag name**에서 이미 push한 `v4.1.3`을 선택한다. 기존 Tag라는 안내를 확인한다. 오타로 새 Tag를 만들거나 Tag 대상을 다른 commit으로 바꾸지 않는다.
-3. 제목은 `Contrabass 4.1.3`, 본문에는 변경점·설치 주의·알려진 문제·시험 통과 또는 생략 여부를 적는다. 이번 skip 발행을 시험 통과라고 쓰지 않는다.
+3. 제목은 `Contrabass 4.1.3`으로 적고 PR에 정리한 버전·날짜와 기능 추가·개선·버그 수정·버전 변경 내용을 본문에 복사한다. PR 템플릿에는 별도 검증 결과·배포물 작성 칸을 강제하지 않는다. 시험 여부가 필요하면 Actions와 Nexus executions 기록에서 확인한다.
 4. 다운로드는 **Nexus의 해당 버전 TAR 고정 URL과 .sha256 URL을 본문 링크로 넣는다.** 릴리스 노트에 시간이 지나면 대상이 바뀌는 current URL만 넣지 않는다. 대용량 TAR를 Gitea 첨부파일로 다시 업로드하지 않는다.
 5. 정식 버전이면 pre-release는 선택하지 않고 **Publish Release**를 누른다. 초안으로 남기려면 Save Draft를 사용한다.
 
@@ -4293,7 +4468,38 @@ Release 화면의 소스 ZIP·TAR.GZ는 해당 Git Tag의 코드 압축본이지
 
 </div>
 
-<p class="subsection-title"><strong>13-3. 사업수행팀 다운로드와 별도 서버 시험</strong></p>
+<p class="subsection-title"><strong>13-3. master를 바꾸지 않고 과거 계열만 패치</strong></p>
+
+<div class="section-body" markdown="1">
+
+master가 4.2 계열이고 4.0.10만 기반으로 고치려면 로컬의 임시 브랜치에서 수정한 뒤 새 Tag만 push한다. 원격 유지보수 브랜치를 만들거나 그 수정을 master에 병합할 필요는 없다.
+
+```bash title="과거 계열 패치 — 로컬 임시 브랜치와 annotated Tag"
+git -c http.sslVerify=false fetch origin --tags
+git switch -c patch/4.0.11 v4.0.10
+```
+
+코드·재료를 수정하고 `release/manifest.yaml`의 release를 `4.0.11`로 맞춰 commit한 뒤 실행한다.
+
+```bash
+git tag -a v4.0.11 -m 'Patch v4.0.11'
+git -c http.sslVerify=false push origin v4.0.11
+```
+
+전체 시험이 기본이다. 시험을 생략하기로 정했다면 **처음 Tag를 만들 때** 메시지에 `[skip-test]`를 넣는다. 아래 명령은 위의 동일 이름 Tag와 중복 실행하는 명령이 아니라 생략을 선택한 경우의 대안이다.
+
+```bash title="과거 계열에서 시험 생략을 선택한 경우"
+git tag -a v4.0.11 -m '[skip-test] Patch v4.0.11'
+git -c http.sslVerify=false push origin v4.0.11
+```
+
+원격에 Tag가 올라간 것을 확인한 뒤 로컬 임시 브랜치는 정리할 수 있다. Tag가 커밋을 계속 가리키므로 다음 4.0 패치는 `v4.0.11`에서 시작한다. 기존 Tag 메시지를 바꾸기 위해 삭제·강제 push하지 않는다. 4.0 channel은 갱신되지만, 더 높은 4.2가 있는 current를 4.0으로 내리지는 않는다.
+
+이 예외는 **master보다 낮은 릴리스 계열**에만 적용한다. 현재·미래 계열은 병합된 릴리스 PR이 필요하다. PR 없이 발행하는 패치에는 PR 라벨이 없으므로 annotated Tag 메시지로 시험을 선택한다.
+
+</div>
+
+<p class="subsection-title"><strong>13-4. 사업수행팀 다운로드와 별도 서버 시험</strong></p>
 
 <div class="section-body" markdown="1">
 
@@ -4340,6 +4546,12 @@ sudo nerdctl exec okestro-os-ansible true
 | exit code 3과 tf 파일명만 출력 | tofu fmt -check -diff로 정렬 차이 확인 |
 | Git/API 401·403 | CI 토큰의 사용자·scope·저장소 권한 |
 | Nexus 401·403 | CI role과 Repository 이름 |
+| Nexus 429·비밀번호 변경 후 재차 로그인 실패 | 잘못된 인증을 반복하는 CLI 중단, ID 앞뒤 공백·계정 상태·요청 로그 확인 |
+| Command not found: nerdctl가 호스트 빌드에서 발생 | 설치된 build-bundle.sh가 Skopeo 버전인지, IMAGE_CACHE_DIR·Skopeo 설치 여부 |
+| socat: command not found | 호스트 socat 설치와 root wrapper의 PATH |
+| HAProxy map entry not found | 디스크 파일과 Runtime map 구분, 최신 update-release-alias의 set/add 처리 |
+| ssh_ready no route to host | Runner에서 VM 첫 NIC의 TCP 22 경로·방화벽. SSH 키 확인보다 앞 단계 |
+| deploy가 curl exit 28로 종료 | 첫 VM에서 NEXUS_DOWNLOAD_URL로의 라우팅·외부 포트·TLS·전송 시간 |
 | VM 복제 뒤 reconfigure 실패 | vCenter 작업·이벤트의 부족 privilege ID |
 | uplink 초기화 대기 | guest-init 로그와 ens38 NM profile |
 | Nexus HTTPS 대기 | 컨테이너 로그, keystore·소유권·포트 |
@@ -4358,6 +4570,8 @@ sudo nerdctl exec okestro-os-ansible true
 Nexus Cleanup Policies에 raw, Component Age 3일의 staging 전용 정책을 만들어 raw-release-staging에만 연결한다. Cleanup task·compact 시간을 확인하고 백업 창과 겹치지 않게 한다. 가장 긴 시험보다 짧은 TTL을 쓰지 않는다.
 
 계열별 최종 Bundle 3개는 게시 스크립트와 RELEASE_KEEP_COUNT=3이 관리한다. Raw·Docker 원본에 같은 기간 삭제를 적용하지 않는다. 삭제 표시한 파일의 물리 공간 반환은 compact가 담당한다.
+
+보안 검사는 [Trivy 원리](../concepts/2026-10-30-trivy-vulnerability-principles.md)와 [Nexus 재료 검사 가이드](2026-10-30-trivy-nexus-scanning-guide.md)로 별도 수행할 수 있다. 현재 Workflow에 자동 보안 차단이 추가된 것은 아니다. 버전 고정·해시 검증과 취약점 검사는 목적이 다르며, 기존 버전이 최신 보안 기준을 충족한다는 뜻으로 읽지 않는다.
 
 백업 설정·실행 명령·timer도 묶음에 포함했다. 백업 저장소·임시 경로·비밀번호 파일 경로는 services.env의 마지막 항목에서 지정한다. backup.env는 공통 설정을 읽고 백업 명령에 필요한 값을 구성하므로 직접 수정하지 않는다. 별도 물리서버와 첫 수동 백업이 준비되기 전에는 timer를 켜지 않는다.
 
@@ -4635,7 +4849,7 @@ systemctl list-timers release-services-backup.timer
 
 | 최종 확인 | 완료 기준 |
 | --- | --- |
-| Gitea | 로그인·clone·PR 승인·merge·Tag 발행 |
+| Gitea | 로그인·clone·PR 병합·Tag 발행, 필수 승인 0개 |
 | Nexus | 관리자·CI·다운로드 권한 구분, 초기 재료 준비 |
 | Runner | label 일치, 동시 작업 1개, UI 로그 표시 |
 | skip / full | 선택과 결과가 각각 기록됨 |
@@ -4644,6 +4858,6 @@ systemctl list-timers release-services-backup.timer
 | 재부팅 | 유지보수 창에서 OS 재기동 후 서비스·URL 재확인 |
 | 백업 | 원격 snapshot과 복원 수단 확인 |
 
-이제 물리서버는 Git·파일 저장소를 넘어, 승인한 코드에서 배포물을 만드는 기반이 된다. 일상 변경은 코드와 재료 목록에 반영하고 호스트의 빌더를 릴리스마다 편집하는 운영으로 돌아가지 않는다.
+이제 물리서버는 Git·파일 저장소를 넘어, PR로 병합한 코드에서 배포물을 만드는 기반이 된다. 일상 변경은 코드와 재료 목록에 반영하고 호스트의 빌더를 릴리스마다 편집하는 운영으로 돌아가지 않는다.
 
 [← 9편: 백업과 복구](2026-10-22-gitea-lightweight-9.md) · [1편: 경량화를 시작한 이유](2026-10-15-gitea-lightweight-1.md)

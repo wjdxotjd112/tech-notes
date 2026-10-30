@@ -7,6 +7,7 @@ set -euo pipefail
 }
 source /etc/gitea-runner-env/bundle-pipeline.env
 source "${BUNDLE_BUILDER_DIR}/common.sh"
+require_commands socat flock awk chmod mv
 IFS= read -r NEXUS_PASSWORD
 
 channel="$1"
@@ -38,21 +39,21 @@ flock 9
 
 map_temp="$(mktemp "${HAPROXY_MAP_FILE}.XXXXXX")"
 trap 'rm -f -- "${map_temp}"' EXIT
-map_action=add
-if awk -v alias_path="${alias_path}" '$1 == alias_path {found=1} END {exit !found}' "${HAPROXY_MAP_FILE}"; then
-  map_action=set
-fi
 awk -v alias_path="${alias_path}" '$1 != alias_path' "${HAPROXY_MAP_FILE}" > "${map_temp}"
 printf '%s %s\n' "${alias_path}" "${target_url}" >> "${map_temp}"
 chmod 0644 "${map_temp}"
-mv -f -- "${map_temp}" "${HAPROXY_MAP_FILE}"
 
-response="$(printf '%s map %s %s %s\n' "${map_action}" "${HAPROXY_MAP_FILE}" "${alias_path}" "${target_url}" \
+response="$(printf 'set map %s %s %s\n' "${HAPROXY_MAP_FILE}" "${alias_path}" "${target_url}" \
   | socat -t 5 - "UNIX-CONNECT:${HAPROXY_SOCKET}")"
+if [[ "${response}" == *'entry not found'* || "${response}" == *'pattern not found'* ]]; then
+  response="$(printf 'add map %s %s %s\n' "${HAPROXY_MAP_FILE}" "${alias_path}" "${target_url}" \
+    | socat -t 5 - "UNIX-CONNECT:${HAPROXY_SOCKET}")"
+fi
 [[ -z "${response}" || "${response}" == *"New entry added"* ]] || {
   echo "HAProxy map update failed: ${response}" >&2
   exit 1
 }
+mv -f -- "${map_temp}" "${HAPROXY_MAP_FILE}"
 
 nexus_curl -fsSIL \
   "${PUBLIC_RELEASE_URL%/}${alias_path}" -o /dev/null
