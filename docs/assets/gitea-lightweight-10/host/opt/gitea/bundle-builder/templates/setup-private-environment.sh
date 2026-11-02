@@ -117,6 +117,16 @@ fi
 systemctl is-active --quiet containerd
 nerdctl info >/dev/null
 
+if [[ -n "${PRIVATE_IMAGE_CLEANUP_DIR:-}" ]]; then
+  command -v ctr >/dev/null
+  cleanup_address="${CONTAINERD_ADDRESS:-$(nerdctl --help | sed -n 's/.*--address string.*(default "\([^"]*\)").*/\1/p')}"
+  cleanup_namespace="$(nerdctl info --mode native --format '{{.Namespace}}')"
+  [[ -n "${cleanup_address}" && -n "${cleanup_namespace}" ]]
+  printf '%s\n' "${cleanup_address#unix://}" "${cleanup_namespace}" > "${PRIVATE_IMAGE_CLEANUP_DIR}/connection"
+  ctr --address "${cleanup_address#unix://}" --namespace "${cleanup_namespace}" images list \
+    | awk 'NR > 1 {print $1 "|" $3}' > "${PRIVATE_IMAGE_CLEANUP_DIR}/before"
+fi
+
 echo "[3/9] Configure private registry TLS"
 install -d -m 0755 "/etc/containerd/certs.d/${NEXUS_REGISTRY}"
 printf 'server = "%s"\n\n[host."%s"]\n  capabilities = ["pull", "resolve", "push"]\n  skip_verify = true\n' \

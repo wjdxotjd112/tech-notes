@@ -142,6 +142,7 @@ sudo ./deploy.sh 192.0.2.101 --accept-eula
 | ③ Nexus 준비 | Nexus 이미지 load, HTTPS 설정, 컨테이너 실행·응답 대기 |
 | ④ 재료 반입 | Repository 생성, `raw/` 업로드, 이미지 load·고객사 주소로 tag·push |
 | ⑤ Ansible 준비 | 반입한 코드와 이미지를 이용해 `okestro-os-ansible` 실행 |
+| ⑥ 로컬 참조 정리 | 두 서비스 확인 후 이번 반입에서 새로 생긴 불필요한 이미지 참조만 제거 |
 
 Nexus의 Repository와 파일 경로는 사내와 같은 형태로 유지한다. 주소만 고객사 것으로 달라지므로 Ansible이 같은 파일 경로를 계속 사용할 수 있다.
 
@@ -160,21 +161,47 @@ nerdctl logs --tail 50 nexus
 
 `nexus`와 `okestro-os-ansible`이 실행 중인지 확인한다. Private Nexus 주소는 스크립트의 완료 출력과 `nexus/compose.yaml`의 호스트 포트로 확인한다.
 
-이 시리즈의 고객사 예시는 `https://192.0.2.101:8443`이다. 반입본에서 포트를 바꿨다면 아래 확인 URL과 다음 절의 `nexus_url`을 **그 포트에 맞춰 함께 바꾼다.** 사내 서버의 Nexus 포트와 다운로드 포트도 서로 구분한다.
+최신 배포 템플릿의 고객사 기본 포트는 55555이며 예시는 `https://192.0.2.101:55555`다. 반입본에서 포트를 바꿨다면 아래 확인 URL과 다음 절의 `nexus_url`을 **그 포트에 맞춰 함께 바꾼다.** 사내 서버의 Nexus 포트와 다운로드 포트도 서로 구분한다.
 
 | 접속점 | 시리즈의 예시 |
 | --- | --- |
 | 사내 Nexus 직접 접속 | `https://192.0.2.10:55555` |
 | 사내 TAR 다운로드 진입점 | `https://192.0.2.10:8443` |
-| 고객사 Private Nexus | `https://192.0.2.101:8443` |
+| 고객사 Private Nexus | `https://192.0.2.101:55555` |
 
 ```bash title="고객사 Nexus 응답과 반입 파일 확인"
-curl -kfsS https://192.0.2.101:8443/service/rest/v1/status
+curl -kfsS https://192.0.2.101:55555/service/rest/v1/status
 curl -kfsSI \
-  https://192.0.2.101:8443/repository/raw-hosted/ansible-runtime/runc.amd64
+  https://192.0.2.101:55555/repository/raw-hosted/ansible-runtime/runc.amd64
 ```
 
 현재 Private Nexus 템플릿은 Raw·Docker의 익명 읽기를 허용하도록 구성되어 있다. 이 설정은 쓰기 권한까지 공개한다는 뜻이 아니다. 사내 Nexus의 다운로드 계정은 고객사 Ansible 변수에 그대로 넣는 값이 아니다.
+
+</div>
+
+<p id="private-image-ref-cleanup" class="subsection-title"><strong>3-4. 반입이 끝난 뒤 로컬 이미지 참조 정리</strong></p>
+
+<div class="section-body" markdown="1">
+
+`nerdctl load`는 TAR에 저장된 사내 주소를 복원한다. 여기에 고객사 주소로 tag를 추가하면 같은 digest가 여러 이름으로 보일 수 있다. 사내 주소가 남았다고 모두 예전 버전인 것은 아니며, 표시된 SIZE를 이름별로 합산한 값이 실제 점유 용량도 아니다.
+
+확인한 nerdctl v2.3.5는 불러온 TAR의 최상위 인덱스에 `import@sha256:…` 참조를 생성한다. 인덱스는 여러 이미지의 manifest를 가리키는 목록이다. 실제로 `release-images.tar`와 `nexus-image.tar`의 `index.json` 해시가 각각의 import 참조 digest와 일치했다. inspect가 하위 Ansible 이미지 정보를 보여도 묶음 인덱스 자체를 별도의 Ansible 버전으로 해석하지 않는다. [nerdctl v2.3.5 load 구현](https://github.com/containerd/nerdctl/blob/v2.3.5/pkg/imgutil/load/load.go)
+
+최신 `deploy.sh`는 **Nexus 응답과 두 컨테이너의 실행 상태를 확인한 뒤** 다음 기준으로 정리한다.
+
+| 대상 | 처리 |
+| --- | --- |
+| `image-map.txt`의 사내 원본 이름 | 이번 실행에서 새로 생겼고, 같은 digest의 고객사 대상 참조가 로컬에 있으면 제거 |
+| 이번 TAR의 import 인덱스·관련 보조 참조 | 이번 실행에서 새로 생성됐고 컨테이너가 사용하지 않으면 제거 |
+| 고객사 대상 참조·Nexus 이름 | 유지 |
+| 실행·중지 컨테이너가 사용하는 이름 | 유지 |
+| 실행 전에 존재하던 참조·무관한 이미지 | 유지 |
+
+containerd의 실제 접속 주소와 namespace를 감지해 정확한 참조 이름만 제거한다. 전체 prune이나 IMAGE ID 단위 강제 삭제가 아니며, **Private Nexus 안의 이미지를 삭제하는 작업도 아니다.** 개별 이미지에 필요한 manifest·인덱스·레이어는 유지할 참조를 통해 남는다.
+
+실패해서 두 서비스의 기동 확인을 통과하지 못하면 정리도 실행하지 않는다. 이미 만들어진 TAR나 이전 실행의 잔여물을 소급 정리하지 않으므로 최신 두 템플릿을 포함한 새 릴리스부터 적용한다. 템플릿 교체 위치와 전체 코드는 [10편의 빌더·배포 템플릿](2026-10-22-gitea-lightweight-10.md#bundle-templates)에 있다.
+
+**검증 범위:** Bash 문법 검사와 기존 참조 보존·사용 중 참조 보존·대상 동일 이름·삭제 실패 등 9개 모의 검증을 통과했다. 새 TAR로 고객사 설치부터 정리 후 컨테이너 재시작까지의 통합 시험은 별도 확인 대상이다.
 
 </div>
 
@@ -206,7 +233,7 @@ contrabass-engine-deploy/
 
 ```yaml title="inventory/group_vars/all/main.yml — 주소 부분"
 # Controller01 API Network
-nexus_url: 192.0.2.101:8443
+nexus_url: 192.0.2.101:55555
 package_ip: 198.51.100.10/rocky-9.6
 ```
 

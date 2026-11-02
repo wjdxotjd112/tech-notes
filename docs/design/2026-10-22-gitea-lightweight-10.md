@@ -24,7 +24,7 @@ tags:
 
 ## 1. 완성할 환경과 먼저 준비할 것
 
-**설정 묶음 갱신: 2026-10-30.** 필수 PR 승인은 0개, 시험 생략 라벨은 `skip-test`로 맞췄다. master의 PR 병합 제한은 유지한다. Runner와 시험 VM이 서로 다른 Nexus 주소를 쓰는 환경도 아래 설정으로 구분한다.
+**설정 묶음 갱신: 2026-11-02.** 필수 PR 승인은 0개, 시험 생략 라벨은 `skip-test`로 맞췄다. master의 PR 병합 제한은 유지한다. Runner와 시험 VM의 Nexus 접속 주소를 구분하고, HAProxy map에는 호스트 없는 경로를 저장한다. 고객사 배포 완료 후에는 이번 반입으로 생성된 불필요한 로컬 이미지 참조만 정리한다.
 
 기준은 **새 Ubuntu 24.04 LTS x86_64 물리서버 한 대**다. 기존 운영 서버에 아래 디렉터리나 설정을 덮어쓰는 절차가 아니다. 서비스·데이터를 그대로 옮기는 작업이라면 DB와 Blob을 함께 복구하는 방식을 사용한다.
 
@@ -1151,6 +1151,47 @@ cmp /root/private-cloud-v4/release/manifest.yaml "${SEED_DIR}/manifest.yaml"
 
 `archive_sha256`은 첫 출력과 맞아야 한다. cmp는 두 manifest가 다르면 실패한다. 최초 등록 명령도 Raw의 전후 SHA256과 Docker의 `Docker-Content-Digest`를 대조한다. Tag 이름만으로 같은 이미지라고 판단하지 않는다.
 
+<details class="analysis-toggle" markdown="1">
+<summary>Nexus 이미지를 바꿨는데 archive checksum 오류가 나는 경우</summary>
+
+빌더가 비교하는 것은 **로컬 `NEXUS_BASE_IMAGE` TAR 파일의 SHA256**과 **Nexus에 게시된 해당 릴리스 manifest의 `nexus.archive_sha256`**이다. 실행 중인 사내 Nexus 컨테이너나 `docker images`의 IMAGE ID를 비교하는 검사가 아니다.
+
+| 설정 | 사용하는 곳 |
+| --- | --- |
+| `services.env`의 `NEXUS_IMAGE` | 사내 Nexus 서비스 Compose. Compose가 `${NEXUS_IMAGE}`를 참조할 때 적용 |
+| `bundle-pipeline.env`의 `NEXUS_BASE_IMAGE` | 고객사 TAR에 넣을 로컬 Nexus 이미지 archive |
+| manifest의 `nexus.image` | 고객사에서 실행할 Nexus 이미지 이름·태그 |
+| manifest의 `nexus.archive_sha256` | 위 로컬 archive 파일의 해시 |
+
+예를 들어 새 archive가 `nexus3-3.96.5.tar`라면 빌더 디렉터리에 배치하고 `NEXUS_BASE_IMAGE`를 그 경로로 변경한다. 다운로드 설정의 3.96.1은 기준 예시이며, 새 파일을 찾아 자동 선택하는 값이 아니다.
+
+```bash title="준비한 새 archive 배치 — Runner 호스트"
+install -m 0644 ./nexus3-3.96.5.tar /opt/gitea/bundle-builder/nexus3-3.96.5.tar
+sha256sum /opt/gitea/bundle-builder/nexus3-3.96.5.tar
+tar -xOf /opt/gitea/bundle-builder/nexus3-3.96.5.tar manifest.json | jq -r '.[].RepoTags[]?'
+```
+
+```bash title="bundle-pipeline.env — Nexus archive 경로를 변경한 예"
+NEXUS_BASE_IMAGE="${BUNDLE_BUILDER_DIR}/nexus3-3.96.5.tar"
+```
+
+제품 코드의 manifest에는 TAR에서 확인한 이미지 이름과 `sha256sum` 결과를 기록한다. **Registry의 이미지 digest를 archive_sha256에 넣지 않는다.** 같은 이미지를 다시 export해도 archive의 직렬화 방식에 따라 파일 해시가 달라질 수 있다.
+
+빌더는 로컬 수정본이 아니라 Nexus의 `releases/<계열>/<Tag>/manifest.yaml`을 읽는다. 확인할 때도 실패한 Tag의 게시본을 기준으로 비교한다.
+
+```bash title="실제 입력 파일과 게시된 manifest 확인"
+source /etc/gitea-runner-env/bundle-pipeline.env
+printf 'Archive: %s\n' "${NEXUS_BASE_IMAGE}"
+sha256sum "${NEXUS_BASE_IMAGE}"
+curl -kfsS --user '<NEXUS_ID>' \
+  "${NEXUS_URL%/}/repository/${MANIFEST_REPOSITORY}/releases/4.2/v4.2.3/manifest.yaml" \
+  | sed -n '1,8p'
+```
+
+사용자 ID와 조회할 계열·Tag는 실제 값으로 바꾼다. Registry push나 사내 서비스 Compose 변경만으로 패키징 입력이 자동 갱신되지는 않는다. 이미 발행한 manifest 내용을 바꿔야 한다면 기존 Tag를 강제로 덮어쓰지 않고 새 릴리스로 준비한다.
+
+</details>
+
 </div>
 
 <p class="subsection-title"><strong>6-3. Ansible 설정과 사내 install.sh</strong></p>
@@ -1534,6 +1575,8 @@ sudo -u gitea-runner ssh-keygen -t rsa -b 4096 -N '' \
 아직 Runner를 기동하지 않는다. 빌더·HAProxy·시험 파일을 먼저 준비한다.
 
 ---
+
+<a id="bundle-templates"></a>
 
 ## 9. 빌더·root wrapper·고객사 템플릿 배치
 
@@ -2494,7 +2537,6 @@ require_commands<span class="w"> </span>socat<span class="w"> </span>flock<span 
 
 <span class="nv">alias_path</span><span class="o">=</span><span class="s2">"/repository/</span><span class="si">${</span><span class="nv">MANIFEST_REPOSITORY</span><span class="si">}</span><span class="s2">/channels/</span><span class="si">${</span><span class="nv">channel</span><span class="si">}</span><span class="s2">/contrabass-engine-deploy.tar"</span>
 <span class="nv">release_path</span><span class="o">=</span><span class="s2">"/repository/</span><span class="si">${</span><span class="nv">BUNDLE_REPOSITORY</span><span class="si">}</span><span class="s2">/releases/</span><span class="si">${</span><span class="nv">release_line</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">release_tag</span><span class="si">}</span><span class="s2">/contrabass-engine-deploy.tar"</span>
-<span class="nv">target_url</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">PUBLIC_RELEASE_URL</span><span class="p">%/</span><span class="si">}${</span><span class="nv">release_path</span><span class="si">}</span><span class="s2">"</span>
 nexus_curl<span class="w"> </span>-fsSI<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NEXUS_URL</span><span class="p">%/</span><span class="si">}${</span><span class="nv">release_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;/dev/null
 
 <span class="nb">exec</span><span class="w"> </span><span class="m">9</span>&gt;/run/lock/release-alias.lock
@@ -2503,13 +2545,13 @@ flock<span class="w"> </span><span class="m">9</span>
 <span class="nv">map_temp</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">.XXXXXX"</span><span class="k">)</span><span class="s2">"</span>
 <span class="nb">trap</span><span class="w"> </span><span class="s1">'rm -f -- "${map_temp}"'</span><span class="w"> </span>EXIT
 awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">alias_path</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s1">'$1 != alias_path'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
-<span class="nb">printf</span><span class="w"> </span><span class="s1">'%s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'%s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">release_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
 chmod<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">map_temp</span><span class="si">}</span><span class="s2">"</span>
 
-<span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'set map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'set map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">release_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="p">|</span><span class="w"> </span>socat<span class="w"> </span>-t<span class="w"> </span><span class="m">5</span><span class="w"> </span>-<span class="w"> </span><span class="s2">"UNIX-CONNECT:</span><span class="si">${</span><span class="nv">HAPROXY_SOCKET</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
 <span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s1">'entry not found'</span>*<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s1">'pattern not found'</span>*<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
-<span class="w">  </span><span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'add map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">response</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'add map %s %s %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HAPROXY_MAP_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">release_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="p">|</span><span class="w"> </span>socat<span class="w"> </span>-t<span class="w"> </span><span class="m">5</span><span class="w"> </span>-<span class="w"> </span><span class="s2">"UNIX-CONNECT:</span><span class="si">${</span><span class="nv">HAPROXY_SOCKET</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span>
 <span class="k">fi</span>
 <span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">response</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*<span class="s2">"New entry added"</span>*<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
@@ -2520,7 +2562,7 @@ mv<span class="w"> </span>-f<span class="w"> </span>--<span class="w"> </span><s
 
 nexus_curl<span class="w"> </span>-fsSIL<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">PUBLIC_RELEASE_URL</span><span class="p">%/</span><span class="si">}${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-o<span class="w"> </span>/dev/null
-<span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">${</span><span class="nv">target_url</span><span class="si">}</span><span class="s2">"</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">alias_path</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">${</span><span class="nv">release_path</span><span class="si">}</span><span class="s2">"</span>
 </code></pre></div>
 
 </details>
@@ -2557,6 +2599,56 @@ nexus_curl<span class="w"> </span>-fsSIL<span class="w"> </span><span class="se"
 <span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
 <span class="o">}</span>
 
+<span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="s2">"</span>
+<span class="nb">export</span><span class="w"> </span>PRIVATE_IMAGE_CLEANUP_DIR
+<span class="nb">trap</span><span class="w"> </span><span class="s1">'rm -rf -- "${PRIVATE_IMAGE_CLEANUP_DIR}"'</span><span class="w"> </span>EXIT
+
+cleanup_imported_image_refs<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>address<span class="w"> </span>namespace<span class="w"> </span>ref<span class="w"> </span>digest<span class="w"> </span>source_ref<span class="w"> </span>name<span class="w"> </span>tag<span class="w"> </span>expected<span class="w"> </span>target_ref<span class="w"> </span>archive<span class="w"> </span>index_sha<span class="w"> </span>used_refs
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>-a<span class="w"> </span>cleanup_ctr
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-s<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/connection"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/before"</span><span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">  </span><span class="o">{</span>
+<span class="w">    </span><span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>address
+<span class="w">    </span><span class="nv">IFS</span><span class="o">=</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>namespace
+<span class="w">  </span><span class="o">}</span><span class="w"> </span>&lt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/connection"</span>
+<span class="w">  </span><span class="nv">cleanup_ctr</span><span class="o">=(</span>ctr<span class="w"> </span>--address<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">address</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--namespace<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">namespace</span><span class="si">}</span><span class="s2">"</span><span class="o">)</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_ctr</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>images<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'NR &gt; 1 {print $1 "|" $3}'</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/after"</span>
+<span class="w">  </span>cut<span class="w"> </span>-d<span class="w"> </span><span class="s1">'|'</span><span class="w"> </span>-f<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/before"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/existing"</span>
+<span class="w">  </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/candidates"</span>
+<span class="w">  </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/digests"</span>
+<span class="w">  </span>:<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/keep"</span>
+<span class="w">  </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="s1">'|'</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>source_ref<span class="w"> </span>name<span class="w"> </span>tag<span class="w"> </span>expected<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^sha256:<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="m">1</span>
+<span class="w">    </span><span class="nv">target_ref</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">nexus_host</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">NEXUS_PORT</span><span class="si">}</span><span class="s2">/docker-hosted/</span><span class="si">${</span><span class="nv">name</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">tag</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/keep"</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>grep<span class="w"> </span>-Fxq<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">target_ref</span><span class="si">}</span><span class="s2">|</span><span class="si">${</span><span class="nv">expected</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/after"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">source_ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/candidates"</span>
+<span class="w">      </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">expected</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/digests"</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/images/image-map.txt"</span>
+<span class="w">  </span><span class="nv">ref</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>awk<span class="w"> </span>-F<span class="s1">'"'</span><span class="w"> </span><span class="s1">'/^  image: / {print $2; exit}'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/manifest.yaml"</span><span class="k">)</span><span class="s2">"</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="p">#docker.io/</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"docker.io/</span><span class="si">${</span><span class="nv">ref</span><span class="p">#docker.io/</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/keep"</span>
+<span class="w">  </span>awk<span class="w"> </span>-F<span class="w"> </span><span class="s1">'|'</span><span class="w"> </span>-v<span class="w"> </span><span class="nv">ref</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s1">'$1 == ref || "docker.io/" $1 == ref || $1 == "docker.io/" ref {print $2}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/after"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/digests"</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>archive<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/images/release-images.tar"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/nexus/nexus-image.tar"</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nv">index_sha</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>tar<span class="w"> </span>-xOf<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">archive</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>index.json<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span><span class="w"> </span>sha256sum<span class="k">)</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'import@sha256:%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">index_sha</span><span class="p">%% *</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/candidates"</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'Remove temporary imported image references'</span>
+<span class="w">  </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span><span class="s1">'|'</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>ref<span class="w"> </span>digest<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span>grep<span class="w"> </span>-Fxq<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/existing"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span>grep<span class="w"> </span>-Fxq<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/keep"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>grep<span class="w"> </span>-Fxq<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/candidates"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">=</span>~<span class="w"> </span>^sha256:<span class="o">[</span><span class="m">0</span>-9a-f<span class="o">]{</span><span class="m">64</span><span class="o">}</span>$<span class="w"> </span><span class="o">]]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">      </span>grep<span class="w"> </span>-Fxq<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">digest</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/digests"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">    </span><span class="nv">used_refs</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_ctr</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>containers<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'NR &gt; 1 {print $2}'</span><span class="k">)</span><span class="s2">"</span>
+<span class="w">    </span>grep<span class="w"> </span>-Fxq<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&lt;&lt;&lt;</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">used_refs</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+<span class="w">    </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_ctr</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>images<span class="w"> </span>remove<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ref</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/after"</span>
+<span class="o">}</span>
+
 <span class="nb">echo</span><span class="w"> </span><span class="s2">"[1/3] Prepare private Nexus and import release artifacts"</span>
 bash<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">bundle_dir</span><span class="si">}</span><span class="s2">/setup-private-environment.sh"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">nexus_host</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--accept-eula
 
@@ -2567,6 +2659,7 @@ bash<span class="w"> </span><span class="s2">"</span><span class="si">${</span><
 curl<span class="w"> </span>-kfsS<span class="w"> </span>--connect-timeout<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="s2">"https://</span><span class="si">${</span><span class="nv">nexus_host</span><span class="si">}</span><span class="s2">:</span><span class="si">${</span><span class="nv">NEXUS_PORT</span><span class="si">}</span><span class="s2">/service/rest/v1/status"</span><span class="w"> </span>&gt;/dev/null
 <span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>nerdctl<span class="w"> </span>container<span class="w"> </span>inspect<span class="w"> </span>-f<span class="w"> </span><span class="s1">'&#123;&#123;.State.Status&#125;&#125;'</span><span class="w"> </span>nexus<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>running<span class="w"> </span><span class="o">]]</span>
 <span class="o">[[</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>nerdctl<span class="w"> </span>container<span class="w"> </span>inspect<span class="w"> </span>-f<span class="w"> </span><span class="s1">'&#123;&#123;.State.Status&#125;&#125;'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">DEPLOY_CONTAINER_NAME</span><span class="si">}</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>running<span class="w"> </span><span class="o">]]</span>
+cleanup_imported_image_refs
 <span class="nb">echo</span><span class="w"> </span><span class="s2">"Private Nexus and </span><span class="si">${</span><span class="nv">DEPLOY_CONTAINER_NAME</span><span class="si">}</span><span class="s2"> are running."</span>
 </code></pre></div>
 
@@ -2693,6 +2786,16 @@ sysctl<span class="w"> </span>--system<span class="w"> </span>&gt;/dev/null
 
 systemctl<span class="w"> </span>is-active<span class="w"> </span>--quiet<span class="w"> </span>containerd
 nerdctl<span class="w"> </span>info<span class="w"> </span>&gt;/dev/null
+
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="k">:-</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">command</span><span class="w"> </span>-v<span class="w"> </span>ctr<span class="w"> </span>&gt;/dev/null
+<span class="w">  </span><span class="nv">cleanup_address</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">CONTAINERD_ADDRESS</span><span class="k">:-$(</span>nerdctl<span class="w"> </span>--help<span class="w"> </span><span class="p">|</span><span class="w"> </span>sed<span class="w"> </span>-n<span class="w"> </span><span class="s1">'s/.*--address string.*(default "\([^"]*\)").*/\1/p'</span><span class="k">)</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">  </span><span class="nv">cleanup_namespace</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>nerdctl<span class="w"> </span>info<span class="w"> </span>--mode<span class="w"> </span>native<span class="w"> </span>--format<span class="w"> </span><span class="s1">'&#123;&#123;.Namespace&#125;&#125;'</span><span class="k">)</span><span class="s2">"</span>
+<span class="w">  </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_address</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_namespace</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">]]</span>
+<span class="w">  </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_address</span><span class="p">#unix://</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_namespace</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/connection"</span>
+<span class="w">  </span>ctr<span class="w"> </span>--address<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_address</span><span class="p">#unix://</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--namespace<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">cleanup_namespace</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>images<span class="w"> </span>list<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">'NR &gt; 1 {print $1 "|" $3}'</span><span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PRIVATE_IMAGE_CLEANUP_DIR</span><span class="si">}</span><span class="s2">/before"</span>
+<span class="k">fi</span>
 
 <span class="nb">echo</span><span class="w"> </span><span class="s2">"[3/9] Configure private registry TLS"</span>
 install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span><span class="s2">"/etc/containerd/certs.d/</span><span class="si">${</span><span class="nv">NEXUS_REGISTRY</span><span class="si">}</span><span class="s2">"</span>
@@ -3082,6 +3185,15 @@ visudo -cf /etc/sudoers.d/contrabass-engine-runner
 
 고객사 TAR에는 shallow Git이 들어가지만 인증 헤더·Git hook은 제거한다. 이미지와 Raw는 지정한 내용인지 확인해 모은다. 고객사는 TAR 전체를 검증한 뒤 deploy.sh를 실행하며, 소스 파일 전체의 SHA256SUMS를 다시 관리하지 않는다.
 
+**고객사 로컬 이미지 정리는 deploy.sh의 마지막 단계다.** setup-private-environment.sh가 런타임 준비 직후, 이미지 반입 전의 참조 이름·digest와 containerd 접속 주소·namespace를 임시 디렉터리에 기록한다. deploy.sh는 Nexus와 Ansible 컨테이너 기동 확인을 통과한 뒤에만 정리한다.
+
+- `image-map.txt`의 사내 원본 참조 중 이번에 생성됐고, 같은 digest의 고객사 대상 참조가 로컬에 있는 항목만 제거.
+- TAR의 `index.json` 해시로 식별한 새 `import@sha256:…`와, 반입 이미지 digest에 연결된 새 보조 참조만 제거.
+- 기존에 있던 참조, 고객사 대상 이름, Nexus 이름, 실행·중지 컨테이너가 사용하는 이름은 유지.
+- containerd의 정확한 참조 이름으로 제거. 전체 prune·강제 삭제·Private Nexus의 Repository 삭제는 없음.
+
+따라서 두 템플릿을 함께 배치해야 한다. 이미 만들어진 TAR에는 소급 적용되지 않으며 다음 패키징부터 포함된다. 이전 실행에서 남아 있던 항목도 이번 실행에서 새로 생성된 것으로 간주하지 않는다. 상세 원인과 확인 방법은 [6편의 로컬 이미지 정리](2026-10-21-gitea-lightweight-6.md#private-image-ref-cleanup)에서 이어진다.
+
 <details class="analysis-toggle" markdown="1">
 <summary>기존 Docker 호스트에 빌더 변경 적용</summary>
 
@@ -3115,6 +3227,8 @@ bash -n "${BUNDLE_BUILDER_DIR}/build-bundle.sh"
 **확인한 범위:** nerdctl을 사용할 수 없는 실행 PATH에서 실제 재료로 TAR 생성과 전체 체크섬 검사를 통과했다. 첫 빌드에서는 이미지 10개를 수집했고, 두 번째 빌드에서는 10개 모두 캐시를 사용했다. 생성한 이미지 TAR를 nerdctl 2.2.2로 불러와 별도 Registry에 push했을 때도 10개 digest가 원본과 일치했다. 이 확인은 패키징과 고객사 이미지 반입 호환성 시험이며, Gitea Workflow 전체·VMware·OpenStack 재배포 시험과는 별개다.
 
 ---
+
+<a id="release-download-proxy"></a>
 
 ## 10. HAProxy의 고정 다운로드 URL 구성
 
@@ -3207,6 +3321,50 @@ test -S "${RELEASE_SOCKET}"
 ```
 
 map에 없는 TAR alias는 404, 일반 경로는 Nexus로 전달한다. current와 계열별 경로에 큰 TAR를 중복 저장하는 구조가 아니다.
+
+**map의 오른쪽 값은 절대 URL이 아니라 `/repository/…` 경로다.** 게시 후 생성되는 값의 예시는 다음과 같다. 최초 설치에서는 위의 빈 map을 유지한다.
+
+```text title="릴리스가 게시된 뒤의 bundle-channels.map 예시"
+/repository/raw-manifest/channels/4.1/contrabass-engine-deploy.tar /repository/raw-release-bundle/releases/4.1/v4.1.3/contrabass-engine-deploy.tar
+/repository/raw-manifest/channels/current/contrabass-engine-deploy.tar /repository/raw-release-bundle/releases/4.2/v4.2.1/contrabass-engine-deploy.tar
+```
+
+공인 주소로 접속하면 공인 주소를, 사설 주소로 접속하면 사설 주소를 유지하고 경로만 바뀐다. 절대 URL에 사설 주소를 넣으면 공인 주소로 요청한 클라이언트도 사설 주소로 안내된다. curl은 호스트가 바뀌는 리다이렉트에서 기본적으로 인증 정보를 전달하지 않으므로 두 번째 요청이 401로 실패할 수 있다. `--location-trusted`로 인증을 다른 호스트에 넘기기보다 동일 호스트의 경로로 안내하는 구조를 사용한다. [curl 리다이렉트와 인증](https://curl.se/docs/manpage.html#-L)
+
+`update-release-alias`도 디스크와 Runtime map 양쪽에 이 경로만 기록한다. `PUBLIC_RELEASE_URL`은 Runner가 검증 요청을 보낼 주소로 계속 사용하고, `NEXUS_URL`은 Nexus API·업로드용으로 유지한다. 두 변수를 없애거나 공인 주소로 일괄 교체하는 변경이 아니다.
+
+<details class="analysis-toggle" markdown="1">
+<summary>기존 설치에서 절대 URL map을 변경하고 적용하기</summary>
+
+기존 map 오른쪽 값에서 `https://호스트:포트`만 제거한다. 현재 릴리스의 계열·Tag·경로는 유지하고 `update-release-alias`도 최신 파일로 함께 교체한다. map 파일을 수동으로 수정하는 것만으로 실행 중인 Runtime map이 바뀌지는 않는다.
+
+다음은 root로 실행하는 설정 검사와 reload다. systemd의 HAProxy 서비스가 이 가이드의 EnvironmentFile을 읽는 구성을 전제로 한다. reload는 기존 연결을 유지하면서 새 worker에 설정을 읽히는 방식이며, 새 설정의 오류는 먼저 검사한다.
+
+```bash title="기존 서버 — 수동 map 변경 후 반영"
+set -a
+source /etc/gitea-runner-env/services.env
+set +a
+haproxy -c -f /etc/haproxy/haproxy.cfg &&
+systemctl reload haproxy
+```
+
+실제 다운로드 진입 주소에서 응답을 확인한다. 아래 주소는 접속 환경에 맞춰 바꾼다.
+
+```bash title="리다이렉트 목적지 확인"
+curl -k -sS -I \
+  'https://203.0.113.10:8443/repository/raw-manifest/channels/current/contrabass-engine-deploy.tar'
+```
+
+기대 응답의 핵심은 **Location에 호스트가 없는 것**이다.
+
+```text title="기대 응답 예시"
+HTTP/2 302
+location: /repository/raw-release-bundle/releases/4.2/v4.2.1/contrabass-engine-deploy.tar
+```
+
+이후 게시에서는 wrapper가 Runtime API와 파일을 함께 갱신하므로 릴리스마다 reload할 필요가 없다. 실제 검증에서는 두 접속 주소의 상대 경로 302, 인증 후 TAR HEAD 200·범위 GET 206, 비인증 401, 없는 채널 404를 확인했다. 고객사 공인 NAT 경로의 직접 시험과는 구분한다.
+
+</details>
 
 ---
 
@@ -4550,6 +4708,8 @@ sudo nerdctl exec okestro-os-ansible true
 | Command not found: nerdctl가 호스트 빌드에서 발생 | 설치된 build-bundle.sh가 Skopeo 버전인지, IMAGE_CACHE_DIR·Skopeo 설치 여부 |
 | socat: command not found | 호스트 socat 설치와 root wrapper의 PATH |
 | HAProxy map entry not found | 디스크 파일과 Runtime map 구분, 최신 update-release-alias의 set/add 처리 |
+| channel은 302인데 최종 TAR가 401 | Location이 다른 호스트로 바뀌는지 확인. map 값과 생성 스크립트를 경로 기반으로 함께 수정 |
+| Nexus image archive checksum 불일치 | 실제 NEXUS_BASE_IMAGE 파일 해시와 해당 Tag의 게시된 manifest archive_sha256 비교. 이미지 digest·서비스 Compose와 구분 |
 | ssh_ready no route to host | Runner에서 VM 첫 NIC의 TCP 22 경로·방화벽. SSH 키 확인보다 앞 단계 |
 | deploy가 curl exit 28로 종료 | 첫 VM에서 NEXUS_DOWNLOAD_URL로의 라우팅·외부 포트·TLS·전송 시간 |
 | VM 복제 뒤 reconfigure 실패 | vCenter 작업·이벤트의 부족 privilege ID |

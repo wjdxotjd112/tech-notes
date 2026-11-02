@@ -81,6 +81,10 @@ channels/current/contrabass-engine-deploy.tar
 
 새 4.1 패치는 4.1 채널만 갱신한다. 전체 최신이 바뀌는 경우에만 current도 바뀐다. `update-release-alias`가 HAProxy map의 대응 주소를 바꾸고, HAProxy는 사용자의 고정 URL을 실제 버전 URL로 안내한다.
 
+map의 목적지는 `https://서버:포트/…`가 아닌 **`/repository/raw-release-bundle/releases/…` 경로만 저장**한다. 공인·사설 어느 주소로 접속해도 원래 호스트·포트를 유지하기 위한 설정이다. 호스트가 다른 절대 URL로 이동하면 curl의 인증 정보가 전달되지 않아 최종 TAR 요청이 401로 끝날 수 있다.
+
+수동으로 map을 바꾼 경우에는 Runtime map에도 반영해야 한다. 생성 스크립트를 그대로 두면 다음 게시에서 절대 URL이 다시 들어갈 수 있으므로 함께 갱신한다. 설정·reload·응답 확인은 [10편의 HAProxy 구성](2026-10-22-gitea-lightweight-10.md#release-download-proxy)에 정리했다.
+
 </div>
 
 <p class="subsection-title"><strong>2-2. 오래된 버전을 지울 때 남기는 것</strong></p>
