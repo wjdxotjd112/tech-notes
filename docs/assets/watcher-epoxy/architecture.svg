@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="875" viewBox="0 0 760 875" role="img" aria-labelledby="title desc">
+<title id="title">Watcher 서비스의 논리 구성</title><desc id="desc">실선 화살표는 요청 전달과 외부 조회·작업 요청의 방향이다. 두 하위 경로는 분석과 실행이며 같은 시점의 병렬 실행을 뜻하지 않는다. API·Decision Engine·Applier는 공통 DB의 객체와 상태를 사용한다.</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#2563eb"/></marker></defs>
+<style>text{font-family:Pretendard,'Noto Sans CJK KR','Malgun Gothic',sans-serif;fill:#1e293b;text-anchor:middle}.title{font-size:25px;font-weight:600}.label{font-size:20px;fill:#3d4d63}.node{fill:white;stroke:#0b1f3a;stroke-width:1.7}.arrow{fill:none;stroke:#2563eb;stroke-width:2.5;marker-end:url(#arrow)}</style>
+<rect x="8" y="8" width="744" height="859" rx="12" fill="#eff5ff"/>
+<rect class="node" x="215" y="32" width="330" height="83" rx="8"/><text class="title" x="380.0" y="66">CLI · Horizon · API client</text><text class="label" x="380.0" y="97">관리 요청과 결과 조회</text>
+<path class="arrow" d="M380 116 V153"/>
+<rect class="node" x="215" y="160" width="330" height="83" rx="8"/><text class="title" x="380.0" y="194">Watcher API</text><text class="label" x="380.0" y="225">권한·입력 검증 / 객체 처리</text>
+<path class="arrow" d="M380 244 V293"/>
+<text class="label" x="500" y="276">RPC cast</text>
+<rect class="node" x="215" y="300" width="330" height="83" rx="8"/><text class="title" x="380.0" y="334">AMQP broker</text><text class="label" x="380.0" y="365">비동기 작업 요청 전달</text>
+<path class="arrow" d="M320 384 V408 H190 V436"/>
+<path class="arrow" d="M440 384 V408 H570 V436"/>
+<rect class="node" x="35" y="443" width="310" height="109" rx="8"/><text class="title" x="190.0" y="477">Decision Engine</text><text class="label" x="190.0" y="508">모델·지표로 전략 실행</text><text class="label" x="190.0" y="535">Solution → Action Plan</text>
+<rect class="node" x="415" y="443" width="310" height="109" rx="8"/><text class="title" x="570.0" y="477">Applier</text><text class="label" x="570.0" y="508">계획·액션 실행</text><text class="label" x="570.0" y="535">TaskFlow → 서비스 호출</text>
+<path class="arrow" d="M190 553 V622"/>
+<text class="label" x="190" y="596">구성·지표 조회</text>
+<path class="arrow" d="M570 553 V622"/>
+<text class="label" x="570" y="596">작업 요청·결과 확인</text>
+<rect class="node" x="35" y="629" width="310" height="110" rx="8"/><text class="title" x="190.0" y="663">외부 정보</text><text class="label" x="190.0" y="694">Nova 등: 자원 모델</text><text class="label" x="190.0" y="721">Prometheus 등: 사용량</text>
+<rect class="node" x="415" y="629" width="310" height="110" rx="8"/><text class="title" x="570.0" y="663">외부 실행 서비스</text><text class="label" x="570.0" y="694">Nova: VM 이동</text><text class="label" x="570.0" y="721">액션별 서비스 API</text>
+<rect class="node" x="35" y="775" width="690" height="77" rx="8"/><text class="title" x="380.0" y="809">공유 Watcher DB</text><text class="label" x="380.0" y="840">API·엔진·Applier의 Audit / Plan / Action과 상태</text>
+</svg>

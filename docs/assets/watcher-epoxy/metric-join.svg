@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="758" viewBox="0 0 760 758" role="img" aria-labelledby="title desc">
+<title id="title">모델과 지표의 식별자 연결</title><desc id="desc">왼쪽 자원 모델의 호스트 이름과 VM UUID를 오른쪽 지표 라벨에 연결한다. Datasource가 값을 조회·변환하고 전략이 해법을 만든다. 논리적인 데이터 처리 순서이며 별도 서비스 배치도는 아니다.</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#2563eb"/></marker></defs>
+<style>text{font-family:Pretendard,'Noto Sans CJK KR','Malgun Gothic',sans-serif;fill:#1e293b;text-anchor:middle}.title{font-size:25px;font-weight:600}.label{font-size:20px;fill:#3d4d63}.node{fill:white;stroke:#0b1f3a;stroke-width:1.7}.arrow{fill:none;stroke:#2563eb;stroke-width:2.5;marker-end:url(#arrow)}</style>
+<rect x="8" y="8" width="744" height="742" rx="12" fill="#eff5ff"/>
+<rect class="node" x="35" y="35" width="310" height="108" rx="8"/><text class="title" x="190.0" y="69">Nova 자원 모델</text><text class="label" x="190.0" y="100">VM UUID / 호스트 이름</text><text class="label" x="190.0" y="127">vCPU / 메모리 / 위치</text>
+<rect class="node" x="415" y="35" width="310" height="108" rx="8"/><text class="title" x="570.0" y="69">Prometheus 지표</text><text class="label" x="570.0" y="100">resource / fqdn 라벨</text><text class="label" x="570.0" y="127">CPU 시간 / 메모리 값</text>
+<path class="arrow" d="M190 144 V180 H300 V213"/>
+<path class="arrow" d="M570 144 V180 H460 V213"/>
+<rect class="node" x="155" y="220" width="450" height="108" rx="8"/><text class="title" x="380.0" y="254">자원 식별자 연결</text><text class="label" x="380.0" y="285">ComputeNode.hostname ↔ fqdn</text><text class="label" x="380.0" y="312">VM UUID ↔ resource</text>
+<path class="arrow" d="M380 329 V374"/>
+<rect class="node" x="155" y="381" width="450" height="108" rx="8"/><text class="title" x="380.0" y="415">Datasource 조회·변환</text><text class="label" x="380.0" y="446">rate / 구간 집계 / 단위 변환</text><text class="label" x="380.0" y="473">시계열 → 전략이 읽는 값</text>
+<path class="arrow" d="M380 490 V535"/>
+<rect class="node" x="155" y="542" width="450" height="81" rx="8"/><text class="title" x="380.0" y="576">Strategy 판단</text><text class="label" x="380.0" y="607">후보 선택 / 모델상 이동 계산</text>
+<path class="arrow" d="M380 624 V663"/>
+<rect class="node" x="155" y="670" width="450" height="65" rx="8"/><text class="title" x="380.0" y="704">Solution → Planner → Plan</text>
+</svg>
