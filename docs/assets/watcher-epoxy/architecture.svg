@@ -14,9 +14,9 @@
 <rect class="node" x="35" y="443" width="310" height="109" rx="8"/><text class="title" x="190.0" y="477">Decision Engine</text><text class="label" x="190.0" y="508">모델·지표로 전략 실행</text><text class="label" x="190.0" y="535">Solution → Action Plan</text>
 <rect class="node" x="415" y="443" width="310" height="109" rx="8"/><text class="title" x="570.0" y="477">Applier</text><text class="label" x="570.0" y="508">계획·액션 실행</text><text class="label" x="570.0" y="535">TaskFlow → 서비스 호출</text>
 <path class="arrow" d="M190 553 V622"/>
-<text class="label" x="190" y="596">구성·지표 조회</text>
+<text class="label" x="275" y="596">구성·지표 조회</text>
 <path class="arrow" d="M570 553 V622"/>
-<text class="label" x="570" y="596">작업 요청·결과 확인</text>
+<text class="label" x="655" y="596">작업 요청·확인</text>
 <rect class="node" x="35" y="629" width="310" height="110" rx="8"/><text class="title" x="190.0" y="663">외부 정보</text><text class="label" x="190.0" y="694">Nova 등: 자원 모델</text><text class="label" x="190.0" y="721">Prometheus 등: 사용량</text>
 <rect class="node" x="415" y="629" width="310" height="110" rx="8"/><text class="title" x="570.0" y="663">외부 실행 서비스</text><text class="label" x="570.0" y="694">Nova: VM 이동</text><text class="label" x="570.0" y="721">액션별 서비스 API</text>
 <rect class="node" x="35" y="775" width="690" height="77" rx="8"/><text class="title" x="380.0" y="809">공유 Watcher DB</text><text class="label" x="380.0" y="840">API·엔진·Applier의 Audit / Plan / Action과 상태</text>
